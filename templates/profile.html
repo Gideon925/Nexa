@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Profile | Nexa</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 25px 15px;
+    background: #f5f2fa;
+    font-family: Arial, sans-serif;
+    color: #292333;
+}
+
+.container {
+    max-width: 700px;
+    margin: auto;
+}
+
+.card {
+    background: white;
+    padding: 28px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.04);
+}
+
+h1, h2 { color: #642da0; }
+
+.photo {
+    width: 125px;
+    height: 125px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 4px solid #eadcf8;
+}
+
+.photo-area {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.progress {
+    height: 10px;
+    background: #eee7f5;
+    border-radius: 20px;
+    overflow: hidden;
+    margin-top: 12px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #642da0;
+}
+
+.notice {
+    background: #f3edfa;
+    padding: 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-top: 15px;
+}
+
+.message {
+    padding: 13px;
+    border-radius: 8px;
+    margin: 12px 0;
+    background: #e6f7eb;
+    color: #176b35;
+}
+
+.message.error {
+    background: #fdeaea;
+    color: #a12626;
+}
+
+label {
+    display: block;
+    margin: 18px 0 7px;
+    font-weight: bold;
+}
+
+input, select, textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 7px;
+    font: inherit;
+}
+
+textarea {
+    min-height: 110px;
+    resize: vertical;
+}
+
+button {
+    margin-top: 22px;
+    padding: 14px;
+    width: 100%;
+    background: #642da0;
+    color: white;
+    border: 0;
+    border-radius: 7px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+.check {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 18px;
+    line-height: 1.5;
+}
+
+.check input {
+    width: auto;
+    margin-top: 4px;
+}
+
+a {
+    color: #642da0;
+    text-decoration: none;
+}
+
+.back {
+    display: inline-block;
+    margin-top: 10px;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<div class="card">
+    <h1>My Nexa Profile</h1>
+    <p>Build your profile so other members can get to know you.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="message {% if category == 'error' %}error{% endif %}">
+            {{ message }}
+        </div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="photo-area">
+        {% if user.profile_photo %}
+            <img class="photo"
+            src="{{ url_for('static', filename='uploads/' + user.profile_photo) }}"
+            alt="Your profile photo">
+        {% else %}
+            <div class="photo" style="display:inline-flex;align-items:center;justify-content:center;">
+                No Photo
+            </div>
+        {% endif %}
+        <h2>{{ user.full_name }}</h2>
+        <p>{{ user.location or 'Location not added' }}</p>
+    </div>
+
+    {% set completed = [
+        user.profile_photo,
+        user.gender,
+        user.location,
+        user.bio,
+        user.interests,
+        user.connection_preference
+    ] %}
+    {% set percentage = ((completed|select|list|length / 6) * 100)|round|int %}
+
+    <h3>Profile completion: {{ percentage }}%</h3>
+    <div class="progress">
+        <div class="progress-fill" style="width:{{ percentage }}%"></div>
+    </div>
+    <p>Complete your profile to help other members understand you better.</p>
+</div>
+
+<div class="card">
+    <h2>Edit Your Information</h2>
+
+    <form method="POST" enctype="multipart/form-data">
+
+        <label>Profile Photo</label>
+        <input type="file" name="profile_photo" accept=".jpg,.jpeg,.png,.webp">
+
+        <label>Gender</label>
+        <select name="gender">
+            <option value="">Select gender</option>
+            {% for option in ["Male", "Female", "Other"] %}
+            <option value="{{ option }}" {% if user.gender == option %}selected{% endif %}>
+                {{ option }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <label>Location (City and State)</label>
+        <input type="text" name="location"
+        value="{{ user.location or '' }}"
+        placeholder="e.g. Calabar, Cross River">
+
+        <label>About Me</label>
+        <textarea name="bio" maxlength="1000"
+        placeholder="Introduce yourself...">{{ user.bio or '' }}</textarea>
+
+        <label>My Interests</label>
+        <input type="text" name="interests" maxlength="500"
+        value="{{ user.interests or '' }}"
+        placeholder="e.g. Music, travel, reading">
+
+        <label>Connection Preference</label>
+        <select name="connection_preference">
+            <option value="">Select preference</option>
+            {% for option in ["Dating", "Friendship", "Friends with benefits", "Casual connections", "Serious relationship"] %}
+            <option value="{{ option }}" {% if user.connection_preference == option %}selected{% endif %}>
+                {{ option }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <div class="notice">
+            Your phone number is private by default. Only enable sharing if you freely agree that verified paying members may see it after paying the contact-unlock fee. You can turn this off later.
+        </div>
+
+        <label class="check">
+            <input type="checkbox" name="contact_sharing_enabled"
+            value="yes" {% if user.contact_sharing_enabled %}checked{% endif %}>
+            <span>I explicitly agree to share my phone number with verified paying members who unlock my contact.</span>
+        </label>
+
+        <button type="submit">Save My Profile</button>
+    </form>
+
+    <a class="back" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+</div>
+
+</div>
+</body>
+</html>

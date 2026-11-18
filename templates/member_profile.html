@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ member.full_name }} | Nexa</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 25px 15px;
+    background: #f7f5fa;
+    font-family: Arial, sans-serif;
+    color: #292333;
+}
+
+.container {
+    max-width: 650px;
+    margin: auto;
+}
+
+.card {
+    background: white;
+    padding: 28px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    box-shadow: 0 3px 14px #00000009;
+}
+
+h1, h2 { color: #642da0; }
+
+.photo {
+    width: 180px;
+    height: 180px;
+    object-fit: cover;
+    border-radius: 50%;
+    background: #eee8f5;
+}
+
+.photo-area { text-align: center; }
+
+.detail {
+    padding: 13px 0;
+    border-bottom: 1px solid #eee;
+    line-height: 1.6;
+}
+
+.notice {
+    background: #f3edfa;
+    padding: 15px;
+    border-radius: 8px;
+    line-height: 1.6;
+}
+
+a {
+    color: #642da0;
+    text-decoration: none;
+}
+
+.back {
+    display: inline-block;
+    padding: 13px 20px;
+    background: #642da0;
+    color: white;
+    border-radius: 7px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="card">
+
+        <div class="photo-area">
+
+            {% if member.profile_photo %}
+            <img
+                class="photo"
+                src="{{ url_for('static', filename='uploads/' + member.profile_photo) }}"
+                alt="Profile photo">
+            {% else %}
+            <div class="photo" style="display:inline-flex;align-items:center;justify-content:center;">
+                No Photo
+            </div>
+            {% endif %}
+
+            <h1>{{ member.full_name }}</h1>
+
+            <p>{{ age }} years old</p>
+
+        </div>
+
+        <div class="detail">
+            <strong>Gender:</strong>
+            {{ member.gender or "Not provided" }}
+        </div>
+
+        <div class="detail">
+            <strong>Location:</strong>
+            {{ member.location or "Not provided" }}
+        </div>
+
+        <div class="detail">
+            <strong>Connection Preference:</strong>
+            {{ member.connection_preference or "Not provided" }}
+        </div>
+
+    </div>
+
+    <div class="card">
+        <h2>About {{ member.full_name }}</h2>
+        <p>{{ member.bio or "This member has not added a biography yet." }}</p>
+    </div>
+
+    <div class="card">
+        <h2>Interests</h2>
+        <p>{{ member.interests or "No interests added yet." }}</p>
+    </div>
+
+    <div class="card">
+        <h2>Contact Privacy</h2>
+
+        {% if not member.contact_sharing_enabled or not member.phone %}
+            <p class="notice">
+                This member is currently keeping their phone number private.
+            </p>
+
+        {% elif contact_unlocked %}
+            <p class="notice">
+                You have unlocked this member's contact number:
+            </p>
+            <h2>{{ member.phone }}</h2>
+
+        {% else %}
+            <p class="notice">
+                This member allows eligible members to unlock their phone number.
+                Pay ₦1,200 to reveal it.
+            </p>
+
+            <form method="POST"
+                  action="{{ url_for('initialize_contact_unlock', profile_owner_id=member.id) }}">
+                <button type="submit" class="back" style="border:0;cursor:pointer;">
+                    Unlock Phone Number — ₦1,200
+                </button>
+            </form>
+        {% endif %}
+    </div>
+
+    <a class="back" href="{{ url_for('discover') }}">Back to Discover</a>
+
+</div>
+
+</body>
+</html>

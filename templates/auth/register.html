@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Nexa Account</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #10101a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            padding: 30px 15px;
+        }
+        .container {
+            background: #1c1c2b;
+            padding: 30px;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 430px;
+        }
+        h1 { text-align: center; color: #d8a7ff; }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin: 8px 0 15px;
+            box-sizing: border-box;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background: #29293b;
+            color: white;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #a855f7;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        label { font-size: 14px; }
+        .message { color: #ff9999; margin-bottom: 12px; }
+        a { color: #d8a7ff; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Join Nexa</h1>
+    <p>Create your account. You must be 18 or older.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <p class="message">{{ message }}</p>
+        {% endfor %}
+    {% endwith %}
+
+    <form method="POST">
+        <label>Full Name</label>
+        <input type="text" name="full_name" required>
+
+        <label>Email Address</label>
+        <input type="email" name="email" required>
+
+        <label>Phone Number</label>
+        <input type="tel" name="phone" required>
+
+        <label>Date of Birth</label>
+        <input type="date" name="date_of_birth" required>
+
+        <label>Password (minimum 8 characters)</label>
+        <input type="password" name="password" minlength="8" required>
+
+        <label>Confirm Password</label>
+        <input type="password" name="confirm_password" minlength="8" required>
+
+        <p>
+            <input type="checkbox" name="age_confirmed" value="yes" required style="width:auto">
+            I confirm that I am 18 years or older.
+        </p>
+
+        <p>
+            <input type="checkbox" name="terms" value="yes" required style="width:auto">
+            I agree to Nexa's terms and conditions.
+        </p>
+
+        <button type="submit">Create Account</button>
+    </form>
+
+    <p>Already registered? <a href="{{ url_for('login') }}">Login</a></p>
+</div>
+</body>
+</html>

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexa Membership</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 30px 15px;
+    background: #f5f2fa;
+    color: #292333;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 950px;
+    margin: auto;
+}
+
+.card {
+    background: white;
+    padding: 25px;
+    border-radius: 14px;
+    margin-bottom: 22px;
+    box-shadow: 0 4px 15px #00000008;
+}
+
+h1, h2, h3 {
+    color: #642da0;
+}
+
+.subtitle {
+    color: #706979;
+    line-height: 1.6;
+}
+
+.status {
+    display: inline-block;
+    padding: 9px 15px;
+    border-radius: 20px;
+    background: #e6f7eb;
+    color: #176b35;
+    font-weight: bold;
+}
+
+.plans {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+}
+
+.plan {
+    border: 2px solid #e5d9f1;
+    border-radius: 13px;
+    padding: 22px;
+    display: flex;
+    flex-direction: column;
+}
+
+.plan.featured {
+    border-color: #642da0;
+}
+
+.price {
+    font-size: 27px;
+    font-weight: bold;
+    color: #642da0;
+    margin: 12px 0;
+}
+
+.duration {
+    color: #777;
+    font-size: 14px;
+}
+
+.saving {
+    display: inline-block;
+    background: #e6f7eb;
+    color: #176b35;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 12px;
+}
+
+.plan ul {
+    padding-left: 20px;
+    line-height: 1.9;
+    color: #514b59;
+    flex-grow: 1;
+}
+
+button, .back {
+    display: inline-block;
+    width: 100%;
+    padding: 14px 18px;
+    border: 0;
+    border-radius: 7px;
+    background: #642da0;
+    color: white;
+    text-decoration: none;
+    text-align: center;
+    font-weight: bold;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+button:hover, .back:hover {
+    background: #4e207f;
+}
+
+.notice {
+    padding: 15px;
+    background: #f3edfa;
+    border-radius: 8px;
+    line-height: 1.7;
+}
+
+.payment-note {
+    color: #706979;
+    font-size: 13px;
+    line-height: 1.6;
+    margin-top: 15px;
+}
+
+@media (max-width: 750px) {
+    .plans {
+        grid-template-columns: 1fr;
+    }
+
+    .card {
+        padding: 20px;
+    }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+    <div class="card">
+        <h1>Nexa Membership</h1>
+        <p class="subtitle">
+            Manage your membership and choose the plan that works for you.
+        </p>
+
+        {% if trial_active %}
+            <span class="status">Free Trial Active</span>
+            <h2>{{ trial_days_remaining }} days remaining</h2>
+            <p>
+                Your seven-day free trial ends on:
+                <strong>{{ trial_ends_at.strftime('%d %B %Y') }}</strong>
+            </p>
+        {% else %}
+            <span class="status"
+                  style="background:#fdeaea;color:#a12626;">
+                Free Trial Expired
+            </span>
+            <p>Your seven-day free trial has ended.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <h2>Choose Your Membership Plan</h2>
+
+        <p class="subtitle">
+            All plans give you access to Nexa Premium membership features.
+            Longer plans include a discount.
+        </p>
+
+        <div class="plans">
+
+            {% for plan_code, plan in plans.items() %}
+
+                <div class="plan {% if plan_code == '6_months' %}featured{% endif %}">
+
+                    <h3>{{ plan.name }}</h3>
+
+                    <div class="price">
+                        ₦{{ "{:,.0f}".format(plan.amount / 100) }}
+                    </div>
+
+                    <p class="duration">
+                        For {{ plan.months }}
+                        {% if plan.months == 1 %}month{% else %}months{% endif %}
+                    </p>
+
+                    {% if plan_code == "6_months" %}
+                        <span class="saving">
+                            Save ₦1,000
+                        </span>
+                    {% elif plan_code == "12_months" %}
+                        <span class="saving">
+                            Save ₦1,000
+                        </span>
+                    {% endif %}
+
+                    <ul>
+                        <li>Discover other members.</li>
+                        <li>View member profiles.</li>
+                        <li>Connect with other members.</li>
+                        <li>Access eligible communication features.</li>
+                    </ul>
+
+                    <form method="POST"
+                          action="{{ url_for('initialize_payment', plan_code=plan_code) }}">
+
+                        <button type="submit">
+                            Choose {{ plan.name }}
+                        </button>
+
+                    </form>
+
+                </div>
+
+            {% endfor %}
+
+        </div>
+
+        <p class="payment-note">
+            Payments are processed through Paystack. Your membership is
+            activated only after the payment has been successfully verified.
+            These are prepaid plans and do not automatically renew.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Contact Unlock</h2>
+
+        <p>
+            Members may separately pay to unlock the phone number of another
+            member who has explicitly enabled contact sharing.
+        </p>
+
+        <h3>₦1,200</h3>
+
+        <p class="subtitle">
+            This is a separate feature and is not included in the membership
+            subscription. Contact unlocking is not yet activated.
+        </p>
+    </div>
+
+    <div class="card">
+        <h2>Payment Information</h2>
+
+        <div class="notice">
+            {% if paystack_mode == "test" %}
+                Nexa is currently using Paystack Test Mode. Test transactions
+                are for development and testing, not real membership payments.
+            {% else %}
+                Payment processing is not available in the current
+                configuration.
+            {% endif %}
+        </div>
+    </div>
+
+    <a class="back" href="{{ url_for('dashboard') }}">
+        Back to Dashboard
+    </a>
+
+</div>
+</body>
+</html>

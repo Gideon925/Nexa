@@ -1,0 +1,232 @@
+cat > templates/index.html <<'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Discover adult connections, dating, friendship and companionship.">
+    <title>Nexa — Discover Your Connection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <header class="navbar">
+        <a href="/" class="logo">nexa<span>.</span></a>
+
+        <nav class="nav-links">
+            <a href="#discover">Discover</a>
+            <a href="#categories">Categories</a>
+            <a href="#how-it-works">How it works</a>
+        </nav>
+
+        <div class="nav-actions">
+            <a href="/login" class="login-btn">Log in</a>
+            <a href="/register" class="signup-btn">Create account</a>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="hero-content">
+                <span class="eyebrow">18+ ADULT CONNECTIONS</span>
+
+                <h1>Meet people.<br>
+                    <span>Make connections.</span>
+                </h1>
+
+                <p>
+                    Whether you're looking for friendship, dating,
+                    companionship or something more, discover people
+                    who are looking for the same connection.
+                </p>
+
+                <div class="hero-actions">
+                    <a href="/register" class="primary-btn">Get started — It's free</a>
+                    <a href="#discover" class="secondary-btn">Explore profiles</a>
+                </div>
+
+                <div class="hero-note">
+                    <span class="check">✓</span>
+                    Enjoy 7 days of free access when you join.
+                </div>
+            </div>
+
+            <div class="hero-visual">
+                <div class="visual-card main-card">
+                    <div class="visual-art">
+                        <div class="art-circle circle-one"></div>
+                        <div class="art-circle circle-two"></div>
+                        <div class="art-person">N</div>
+                    </div>
+                    <div class="visual-info">
+                        <div>
+                            <strong>Your next connection</strong>
+                            <small>Could be closer than you think.</small>
+                        </div>
+                        <span class="online-dot"></span>
+                    </div>
+                </div>
+
+                <div class="floating-card floating-top">
+                    <span class="floating-icon">♡</span>
+                    <div>
+                        <strong>Real connections</strong>
+                        <small>Meet on your terms</small>
+                    </div>
+                </div>
+
+                <div class="floating-card floating-bottom">
+                    <span class="floating-icon">✦</span>
+                    <div>
+                        <strong>Your choice matters</strong>
+                        <small>Privacy comes first</small>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="search-section" id="discover">
+            <div class="section-heading">
+                <span class="eyebrow">START EXPLORING</span>
+                <h2>Find your kind of connection</h2>
+                <p>Discover adults who share your interests and intentions.</p>
+            </div>
+
+            <form class="search-box" action="/discover" method="GET">
+                <div class="search-field">
+                    <label for="connection">I'm looking for</label>
+                    <select name="connection" id="connection">
+                        <option value="">Any connection</option>
+                        <option value="hookup">Casual connections</option>
+                        <option value="fwb">Friends with benefits</option>
+                        <option value="dating">Dating</option>
+                        <option value="friendship">Friendship</option>
+                        <option value="serious">Serious relationship</option>
+                    </select>
+                </div>
+
+                <div class="search-divider"></div>
+
+                <div class="search-field">
+                    <label for="location">Location</label>
+                    <input type="text" name="location" id="location"
+                           placeholder="Enter city or area">
+                </div>
+
+                <div class="search-divider"></div>
+
+                <div class="search-field">
+                    <label for="age">Age range</label>
+                    <select name="age" id="age">
+                        <option value="">Any adult age</option>
+                        <option value="18-24">18–24</option>
+                        <option value="25-34">25–34</option>
+                        <option value="35-44">35–44</option>
+                        <option value="45+">45+</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="search-btn">Search people →</button>
+            </form>
+        </section>
+
+        <section class="categories-section" id="categories">
+            <div class="section-heading">
+                <span class="eyebrow">EXPLORE YOUR OPTIONS</span>
+                <h2>Connections for every intention</h2>
+                <p>Choose what you're interested in and discover like-minded adults.</p>
+            </div>
+
+            <div class="category-grid">
+                <a href="/discover?connection=hookup" class="category-card">
+                    <span class="category-icon">♡</span>
+                    <h3>Casual Connections</h3>
+                    <p>Meet adults interested in casual connections.</p>
+                    <span class="category-link">Explore →</span>
+                </a>
+
+                <a href="/discover?connection=fwb" class="category-card">
+                    <span class="category-icon">✦</span>
+                    <h3>Friends With Benefits</h3>
+                    <p>Find friendship with mutual romantic interests.</p>
+                    <span class="category-link">Explore →</span>
+                </a>
+
+                <a href="/discover?connection=dating" class="category-card">
+                    <span class="category-icon">♥</span>
+                    <h3>Dating</h3>
+                    <p>Meet someone and discover where things go.</p>
+                    <span class="category-link">Explore →</span>
+                </a>
+
+                <a href="/discover?connection=friendship" class="category-card">
+                    <span class="category-icon">◎</span>
+                    <h3>Friendship</h3>
+                    <p>Make new friends and meaningful connections.</p>
+                    <span class="category-link">Explore →</span>
+                </a>
+
+                <a href="/discover?connection=serious" class="category-card">
+                    <span class="category-icon">♡</span>
+                    <h3>Serious Relationships</h3>
+                    <p>Meet people looking for long-term commitment.</p>
+                    <span class="category-link">Explore →</span>
+                </a>
+            </div>
+        </section>
+
+        <section class="how-section" id="how-it-works">
+            <div class="section-heading">
+                <span class="eyebrow">SIMPLE AND STRAIGHTFORWARD</span>
+                <h2>How Nexa works</h2>
+            </div>
+
+            <div class="steps-grid">
+                <div class="step">
+                    <span class="step-number">01</span>
+                    <h3>Create your account</h3>
+                    <p>Register, verify that you're an adult and build your profile.</p>
+                </div>
+
+                <div class="step">
+                    <span class="step-number">02</span>
+                    <h3>Discover people</h3>
+                    <p>Browse profiles and find people with similar interests.</p>
+                </div>
+
+                <div class="step">
+                    <span class="step-number">03</span>
+                    <h3>Connect</h3>
+                    <p>Use the contact-unlock feature to access contact details shared by users.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="trial-section">
+            <div>
+                <span class="eyebrow">YOUR JOURNEY STARTS HERE</span>
+                <h2>Ready to discover new connections?</h2>
+                <p>Create an account and enjoy your first 7 days free.</p>
+            </div>
+            <a href="/register" class="trial-btn">Create your account →</a>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <a href="/" class="logo">nexa<span>.</span></a>
+
+        <p>Discover connections. Respect choices. Stay safe.</p>
+
+        <div class="footer-links">
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+            <a href="/safety">Safety</a>
+            <a href="/contact">Contact</a>
+        </div>
+
+        <small>© 2026 Nexa. All rights reserved. Adults 18+ only.</small>
+    </footer>
+
+</body>
+</html>
+EOF

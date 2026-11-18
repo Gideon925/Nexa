@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In | Nexa</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 30px 15px;
+            font-family: Arial, sans-serif;
+            background: #f5f2fa;
+        }
+
+        .container {
+            max-width: 450px;
+            margin: 50px auto;
+            padding: 35px;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 8px 30px #00000012;
+        }
+
+        h1 {
+            text-align: center;
+            color: #642da0;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #777;
+        }
+
+        label {
+            display: block;
+            margin: 18px 0 7px;
+            font-weight: bold;
+        }
+
+        input {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #ddd;
+            border-radius: 7px;
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            margin-top: 25px;
+            background: #642da0;
+            color: white;
+            border: none;
+            border-radius: 7px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        a {
+            color: #642da0;
+            text-decoration: none;
+        }
+
+        .message {
+            padding: 12px;
+            margin: 10px 0;
+            background: #f1eafa;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Nexa</h1>
+    <p class="subtitle">Welcome back. Sign in to continue.</p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+            <div class="message">{{ message }}</div>
+        {% endfor %}
+    {% endwith %}
+
+    <form method="POST">
+
+        <label>Email Address</label>
+        <input type="email" name="email" required>
+
+        <label>Password</label>
+        <input type="password" name="password" required>
+
+        <button type="submit">Sign In</button>
+
+    </form>
+
+    <p class="subtitle">
+        Don't have an account?
+        <a href="{{ url_for('register') }}">Create Account</a>
+    </p>
+
+</div>
+
+</body>
+</html>

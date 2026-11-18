@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nexa Account Settings</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 25px 15px;
+    background: #f5f2fa;
+    color: #292333;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 750px;
+    margin: auto;
+}
+
+.card {
+    background: white;
+    padding: 25px;
+    border-radius: 13px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 15px #00000008;
+}
+
+h1, h2 { color: #642da0; }
+
+label {
+    display: block;
+    margin: 15px 0 7px;
+    font-weight: bold;
+}
+
+input {
+    width: 100%;
+    padding: 13px;
+    border: 1px solid #ddd5e8;
+    border-radius: 7px;
+    font-size: 15px;
+}
+
+button, .link {
+    display: inline-block;
+    margin-top: 18px;
+    padding: 13px 20px;
+    background: #642da0;
+    color: white;
+    border: 0;
+    border-radius: 7px;
+    text-decoration: none;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.link.secondary {
+    background: #eee7f5;
+    color: #642da0;
+}
+
+.note {
+    color: #777;
+    line-height: 1.6;
+    font-size: 14px;
+}
+
+.flash {
+    padding: 13px;
+    margin-bottom: 12px;
+    background: #f3edfa;
+    border-radius: 7px;
+}
+
+@media(max-width: 550px) {
+    .card { padding: 18px; }
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+    <div class="card">
+        <h1>Account Settings</h1>
+        <p class="note">
+            Manage your Nexa account information, password and privacy.
+        </p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="flash">{{ message }}</div>
+            {% endfor %}
+        {% endwith %}
+    </div>
+
+    <div class="card">
+        <h2>Account Information</h2>
+
+        <form method="POST">
+            <input type="hidden" name="action" value="update_account">
+
+            <label>Full Name</label>
+            <input type="text" name="full_name"
+                   value="{{ user.full_name }}" required>
+
+            <label>Email Address</label>
+            <input type="email" name="email"
+                   value="{{ user.email }}" required>
+
+            <label>Phone Number</label>
+            <input type="tel" name="phone"
+                   value="{{ user.phone }}" required>
+
+            <button type="submit">Save Account Information</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Change Password</h2>
+
+        <form method="POST">
+            <input type="hidden" name="action" value="change_password">
+
+            <label>Current Password</label>
+            <input type="password" name="current_password"
+                   autocomplete="current-password" required>
+
+            <label>New Password</label>
+            <input type="password" name="new_password"
+                   minlength="8" autocomplete="new-password" required>
+
+            <label>Confirm New Password</label>
+            <input type="password" name="confirm_password"
+                   minlength="8" autocomplete="new-password" required>
+
+            <button type="submit">Change Password</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Privacy Settings</h2>
+        <p class="note">
+            Manage your profile visibility and control whether eligible
+            members can unlock your contact information.
+        </p>
+
+        <a class="link secondary" href="{{ url_for('profile') }}">
+            Manage Profile and Privacy
+        </a>
+    </div>
+
+    <div class="card">
+        <h2>Membership</h2>
+
+        {% if current_subscription and current_subscription.status == "active" %}
+            <p>Membership: <strong>Active</strong></p>
+
+            {% if current_subscription.current_period_end %}
+                <p>
+                    Expires:
+                    <strong>
+                        {{ current_subscription.current_period_end.strftime('%d %B %Y') }}
+                    </strong>
+                </p>
+            {% endif %}
+        {% else %}
+            <p>Membership: <strong>Free Trial or Inactive</strong></p>
+        {% endif %}
+
+        <a class="link secondary" href="{{ url_for('subscription') }}">
+            Manage Membership
+        </a>
+    </div>
+
+    <a class="link" href="{{ url_for('dashboard') }}">
+        Back to Dashboard
+    </a>
+
+</div>
+</body>
+</html>
