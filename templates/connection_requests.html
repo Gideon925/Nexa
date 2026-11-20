@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Connection Requests | Nexa</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 25px 15px;
+    background: #f7f5fa;
+    font-family: Arial, sans-serif;
+    color: #292333;
+}
+
+.container {
+    max-width: 750px;
+    margin: auto;
+}
+
+.card {
+    background: white;
+    padding: 25px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    box-shadow: 0 3px 14px #00000009;
+}
+
+h1, h2 { color: #642da0; }
+
+.request {
+    border: 1px solid #eee;
+    border-radius: 10px;
+    padding: 20px;
+    margin-top: 18px;
+}
+
+.profile-link {
+    display: inline-block;
+    margin-top: 8px;
+    color: #642da0;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+button {
+    border: none;
+    padding: 12px 20px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.accept {
+    background: #642da0;
+    color: white;
+}
+
+.reject {
+    background: #eee8f5;
+    color: #642da0;
+}
+
+.empty {
+    background: #f3edfa;
+    padding: 18px;
+    border-radius: 8px;
+    line-height: 1.6;
+}
+
+.back {
+    display: inline-block;
+    padding: 12px 20px;
+    background: #642da0;
+    color: white;
+    text-decoration: none;
+    border-radius: 7px;
+}
+</style>
+</head>
+
+<body>
+
+
+<div class="container">
+
+    <div class="card">
+
+        <h1>Connection Requests</h1>
+
+        <p>People who want to connect with you will appear here.</p>
+
+        {% if requests %}
+
+            {% for item in requests %}
+
+                <div class="request">
+
+                    <h2>{{ item.sender.full_name }}</h2>
+
+                    {% if item.sender.location %}
+                        <p>Location: {{ item.sender.location }}</p>
+                    {% endif %}
+
+                    <p>
+                        Request sent:
+                        {{ item.request.created_at.strftime('%d %B %Y, %I:%M %p') }}
+                    </p>
+
+                    <a
+                        class="profile-link"
+                        href="{{ url_for('member_profile', user_id=item.sender.id) }}">
+                        View Profile
+                    </a>
+
+                    <div class="actions">
+
+                        <form
+                            method="POST"
+                            action="{{ url_for('accept_connection_request', request_id=item.request.id) }}">
+
+                            <button class="accept" type="submit">
+                                Accept
+                            </button>
+
+                        </form>
+
+                        <form
+                            method="POST"
+                            action="{{ url_for('reject_connection_request', request_id=item.request.id) }}">
+
+                            <button class="reject" type="submit">
+                                Reject
+                            </button>
+
+                        </form>
+
+                    </div>
+
+                </div>
+
+            {% endfor %}
+
+        {% else %}
+
+            <div class="empty">
+                You do not have any pending connection requests.
+            </div>
+
+        {% endif %}
+
+        <br><br>
+
+        <a class="back" href="{{ url_for('dashboard') }}">
+            Back to Dashboard
+        </a>
+
+    </div>
+
+</div>
+
+</body>
+</html>

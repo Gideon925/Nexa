@@ -58,6 +58,33 @@ main {
     box-shadow: 0 3px 12px #00000008;
 }
 
+.reminder {
+    background: #fff4dc;
+    border-left: 5px solid #d99118;
+    padding: 18px;
+    margin-top: 18px;
+    border-radius: 8px;
+}
+
+.expired {
+    background: #fff0f0;
+    border-left: 5px solid #c83c3c;
+    padding: 18px;
+    margin-top: 18px;
+    border-radius: 8px;
+}
+
+.subscribe-link {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 12px 20px;
+    background: #642da0;
+    color: white;
+    border-radius: 7px;
+    text-decoration: none;
+    font-weight: bold;
+}
+
 .cards {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -92,6 +119,7 @@ footer {
 
 <body>
 
+
 <header>
     <div class="logo">Nexa</div>
     <a href="{{ url_for('logout') }}">Logout</a>
@@ -106,16 +134,84 @@ footer {
     </section>
 
     <section class="trial">
-        <h2>Your Free Trial</h2>
-        <p>
-            {% if trial_days_remaining > 0 %}
-                You have {{ trial_days_remaining }} days remaining in your free trial.
-            {% else %}
-                Your free trial has ended. Choose a subscription to continue.
-            {% endif %}
-        </p>
+
+        {% if membership.type == "paid" %}
+
+            <h2>Your Paid Membership</h2>
+            <p>Your Nexa subscription is active.</p>
+            <p>
+                Membership expires:
+                <strong>{{ membership.expires_at.strftime('%d %B %Y') }}</strong>
+            </p>
+
+        {% elif membership.type == "trial" %}
+
+            <h2>Your Free Trial</h2>
+            <p>
+                Your free trial is active.
+                You have {{ membership.days_remaining }}
+                day{% if membership.days_remaining != 1 %}s{% endif %}
+                remaining.
+            </p>
+            <p>
+                Trial expires:
+                <strong>{{ membership.expires_at.strftime('%d %B %Y') }}</strong>
+            </p>
+
+        {% else %}
+
+            <h2>Your Membership Has Expired</h2>
+            <p>Your free trial or paid subscription has ended.</p>
+            <p>Choose a membership plan to continue using Nexa's member services.</p>
+
+            <div class="expired">
+                Your membership is no longer active. Renew your subscription to regain access.
+                <br>
+                <a class="subscribe-link" href="{{ url_for('subscription') }}">
+                    Renew Membership
+                </a>
+            </div>
+
+        {% endif %}
+
+        {% if membership.active and membership.days_remaining <= 3 %}
+
+            <div class="reminder">
+
+                {% if membership.days_remaining == 3 %}
+                    <strong>Your membership expires in 3 days.</strong>
+                    <p>Renew early to avoid interruption to your Nexa membership.</p>
+
+                {% elif membership.days_remaining == 2 %}
+                    <strong>Your membership expires in 2 days.</strong>
+                    <p>Only two days remain. Please prepare to renew.</p>
+
+                {% elif membership.days_remaining == 1 %}
+                    <strong>Your membership expires tomorrow.</strong>
+                    <p>Renew now to avoid losing access to member services.</p>
+                {% endif %}
+
+                <a class="subscribe-link" href="{{ url_for('subscription') }}">
+                    Subscribe Now
+                </a>
+            </div>
+
+        {% endif %}
+
         <a href="{{ url_for('subscription') }}">View Subscription</a>
+
     </section>
+
+    {% if not profile_complete %}
+    <div class="card">
+        <h3>Complete Your Profile</h3>
+        <p>
+            Before discovering people or using connections, you must provide
+            all required information and upload a clear photo of yourself.
+        </p>
+        <a href="{{ url_for('profile') }}">Complete My Profile</a>
+    </div>
+    {% endif %}
 
     <section class="cards">
 
@@ -123,6 +219,38 @@ footer {
             <h3>Discover People</h3>
             <p>Explore profiles and find people with similar interests.</p>
             <a href="{{ url_for('discover') }}">Discover Now</a>
+        </div>
+
+        <div class="card">
+            <h3>Nexa Status</h3>
+            <p>Share pictures and short videos that disappear after 24 hours.</p>
+            <a href="{{ url_for('status_feed') }}">View Status</a>
+        </div>
+
+        <div class="card">
+            <h3>Connection Requests</h3>
+            <p>
+                You have {{ pending_request_count }}
+                pending connection request{% if pending_request_count != 1 %}s{% endif %}.
+            </p>
+            <a href="{{ url_for('connection_requests') }}">
+                View Requests
+            </a>
+        </div>
+
+        <div class="card">
+            <h3>Messages</h3>
+            <p>Chat privately with members you have connected with.</p>
+            <a href="{{ url_for('message_inbox') }}">Open Messages</a>
+        </div>
+
+        <div class="card">
+            <h3>Notifications</h3>
+            <p>
+                You have {{ unread_notification_count }}
+                unread notification{% if unread_notification_count != 1 %}s{% endif %}.
+            </p>
+            <a href="{{ url_for('notifications') }}">View Notifications</a>
         </div>
 
         <div class="card">

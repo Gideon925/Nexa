@@ -143,6 +143,7 @@ button:hover, .back:hover {
 </head>
 
 <body>
+
 <div class="container">
 
     <div class="card">
@@ -171,15 +172,15 @@ button:hover, .back:hover {
         <h2>Choose Your Membership Plan</h2>
 
         <p class="subtitle">
-            All plans give you access to Nexa Premium membership features.
-            Longer plans include a discount.
+            Every subscription includes unlimited access to eligible member profiles
+            and phone numbers while your membership remains active.
         </p>
 
         <div class="plans">
 
             {% for plan_code, plan in plans.items() %}
 
-                <div class="plan {% if plan_code == '6_months' %}featured{% endif %}">
+                <div class="plan {% if plan_code == '5_months' %}featured{% endif %}">
 
                     <h3>{{ plan.name }}</h3>
 
@@ -192,21 +193,12 @@ button:hover, .back:hover {
                         {% if plan.months == 1 %}month{% else %}months{% endif %}
                     </p>
 
-                    {% if plan_code == "6_months" %}
-                        <span class="saving">
-                            Save ₦1,000
-                        </span>
-                    {% elif plan_code == "12_months" %}
-                        <span class="saving">
-                            Save ₦1,000
-                        </span>
-                    {% endif %}
-
                     <ul>
                         <li>Discover other members.</li>
-                        <li>View member profiles.</li>
+                        <li>Unlimited access to eligible member profiles.</li>
                         <li>Connect with other members.</li>
-                        <li>Access eligible communication features.</li>
+                        <li>Unlimited access to phone numbers members have agreed to share.</li>
+                        <li>No individual phone-unlock charges while subscribed.</li>
                     </ul>
 
                     <form method="POST"
@@ -239,11 +231,11 @@ button:hover, .back:hover {
             member who has explicitly enabled contact sharing.
         </p>
 
-        <h3>₦1,200</h3>
+        <h3>₦800</h3>
 
         <p class="subtitle">
-            This is a separate feature and is not included in the membership
-            subscription. Contact unlocking is not yet activated.
+            Pay ₦800 to reveal one member's phone number for five minutes.
+            Active subscribers do not pay individual unlock charges.
         </p>
     </div>
 

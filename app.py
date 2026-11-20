@@ -1,9 +1,15 @@
 import os
+import math
+import subprocess
 import uuid
 import calendar
 import hashlib
 import hmac
 import requests
+import smtplib
+
+from email.message import EmailMessage
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, date
@@ -11,13 +17,13 @@ from functools import wraps
 
 from flask import (
     Flask, render_template, request, redirect,
-    url_for, flash, session, abort
+    url_for, flash, session, abort, send_from_directory
 )
 
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-from sqlalchemy import text
+from sqlalchemy import text, and_, or_
 from PIL import Image
 
 
@@ -35,10 +41,64 @@ app.config["SECRET_KEY"] = os.environ.get(
 
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///nexa.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 27 * 1024 * 1024
+
+# Email configuration
+MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+MAIL_PORT = int(os.environ.get("MAIL_PORT", "587"))
+MAIL_USERNAME = os.environ.get("MAIL_USERNAME", "")
+MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD", "")
+MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", MAIL_USERNAME)
+
+email_serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
+
+
+def generate_email_token(user):
+    return email_serializer.dumps(
+        {"user_id": user.id, "email": user.email},
+        salt="nexa-email-verification"
+    )
+
+
+def verify_email_token(token, max_age=3600):
+    return email_serializer.loads(
+        token,
+        salt="nexa-email-verification",
+        max_age=max_age
+    )
+
+
+def send_nexa_email(recipient, subject, body):
+    if not all([MAIL_USERNAME, MAIL_PASSWORD, MAIL_DEFAULT_SENDER]):
+        if app.debug:
+            print("\\n===== NEXA EMAIL NOT CONFIGURED =====")
+            print("Verification email preview:")
+            print(body)
+            print("=====================================\\n")
+        return False
+
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = MAIL_DEFAULT_SENDER
+    message["To"] = recipient
+    message.set_content(body)
+
+    with smtplib.SMTP(MAIL_SERVER, MAIL_PORT, timeout=20) as server:
+        server.starttls()
+        server.login(MAIL_USERNAME, MAIL_PASSWORD)
+        server.send_message(message)
+
+    return True
 
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Private storage for temporary Status pictures and videos.
+STATUS_UPLOAD_FOLDER = os.path.join(app.instance_path, "status_uploads")
+os.makedirs(STATUS_UPLOAD_FOLDER, exist_ok=True)
+
+STATUS_MAX_FILE_SIZE = 25 * 1024 * 1024
+STATUS_MAX_VIDEO_DURATION = 12
 
 db = SQLAlchemy(app)
 
@@ -51,22 +111,22 @@ PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
 PAYSTACK_MODE = os.environ.get("PAYSTACK_MODE", "test")
 PAYSTACK_BASE_URL = "https://api.paystack.co"
 
-CONTACT_UNLOCK_AMOUNT_KOBO = 120000
+CONTACT_UNLOCK_AMOUNT_KOBO = 80000
 
 SUBSCRIPTION_PLANS = {
     "1_month": {
         "name": "1 Month",
-        "amount": 350000,
+        "amount": 380000,
         "months": 1
     },
-    "6_months": {
-        "name": "6 Months",
-        "amount": 2000000,
-        "months": 6
+    "5_months": {
+        "name": "5 Months",
+        "amount": 1900000,
+        "months": 5
     },
     "12_months": {
         "name": "12 Months",
-        "amount": 4100000,
+        "amount": 4560000,
         "months": 12
     }
 }
@@ -81,6 +141,15 @@ class User(db.Model):
 
     full_name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(150), unique=True, nullable=False)
+
+    email_verified = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False
+    )
+
+    email_verified_at = db.Column(db.DateTime, nullable=True)
+    password_reset_token_hash = db.Column(db.String(64), nullable=True)
     phone = db.Column(db.String(30), nullable=False)
     date_of_birth = db.Column(db.Date, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
@@ -171,7 +240,13 @@ class ContactUnlock(db.Model):
         nullable=False
     )
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    expires_at = db.Column(db.DateTime, nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint(
@@ -213,6 +288,244 @@ class Subscription(db.Model):
 
 
 # --------------------------------------------------
+# CONNECTION REQUEST MODEL
+# --------------------------------------------------
+
+class ConnectionRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    sender_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    receiver_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    status = db.Column(
+        db.String(20),
+        default="pending",
+        nullable=False
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    responded_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "sender_id",
+            "receiver_id",
+            name="unique_connection_request"
+        ),
+    )
+
+
+# --------------------------------------------------
+# PRIVATE MESSAGE MODEL
+# --------------------------------------------------
+
+class Message(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    sender_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    receiver_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    body = db.Column(db.Text, nullable=False)
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    read_at = db.Column(db.DateTime, nullable=True)
+
+
+# --------------------------------------------------
+# MEMBER BLOCK MODEL
+# --------------------------------------------------
+
+class MemberBlock(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    blocker_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    blocked_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "blocker_id",
+            "blocked_id",
+            name="unique_member_block"
+        ),
+    )
+
+
+# --------------------------------------------------
+# STATUS MODEL
+# --------------------------------------------------
+
+class Status(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    filename = db.Column(
+        db.String(255),
+        nullable=False
+    )
+
+    media_type = db.Column(
+        db.String(10),
+        nullable=False,
+        default="image"
+    )
+
+    text_content = db.Column(db.Text, nullable=True)
+    caption = db.Column(db.Text, nullable=True)
+
+    background_color = db.Column(
+        db.String(20),
+        nullable=False,
+        default="#5631A8"
+    )
+
+    duration_seconds = db.Column(
+        db.Float,
+        nullable=False
+    )
+
+    uploaded_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    expires_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        index=True
+    )
+
+    __table_args__ = (
+        db.Index("ix_status_user_id", "user_id"),
+    )
+
+
+# --------------------------------------------------
+
+# MEMBER REPORT MODEL
+# --------------------------------------------------
+
+class MemberReport(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    reporter_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    reported_user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    reason = db.Column(db.String(100), nullable=False)
+    details = db.Column(db.Text, nullable=True)
+
+    status = db.Column(
+        db.String(20),
+        default="pending",
+        nullable=False
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+
+# --------------------------------------------------
+# NOTIFICATION MODEL
+# --------------------------------------------------
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    actor_id = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=True
+    )
+
+    notification_type = db.Column(
+        db.String(50),
+        nullable=False
+    )
+
+    message = db.Column(db.String(255), nullable=False)
+
+    target_url = db.Column(db.String(255), nullable=True)
+
+    is_read = db.Column(
+        db.Boolean,
+        default=False,
+        nullable=False
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+
+# --------------------------------------------------
 # GENERAL HELPERS
 # --------------------------------------------------
 
@@ -223,6 +536,16 @@ def login_required(function):
             flash("Please sign in first.", "error")
             return redirect(url_for("login"))
 
+        user = get_current_user()
+
+        if user is None:
+            session.clear()
+            flash("Please sign in again.", "error")
+            return redirect(url_for("login"))
+
+        if not user.email_verified and function.__name__ != "logout":
+            return redirect(url_for("verification_pending"))
+
         return function(*args, **kwargs)
 
     return wrapper
@@ -230,6 +553,203 @@ def login_required(function):
 
 def get_current_user():
     return db.session.get(User, session.get("user_id"))
+
+
+def is_profile_complete(user):
+    if user is None:
+        return False
+
+    required_values = [
+        user.full_name, user.email, user.phone, user.date_of_birth,
+        user.gender, user.location, user.bio, user.interests,
+        user.connection_preference, user.profile_photo
+    ]
+
+    if not all(required_values):
+        return False
+
+    email = user.email.strip()
+    if email.count("@") != 1 or "." not in email.rsplit("@", 1)[1]:
+        return False
+
+    phone_digits = "".join(c for c in user.phone if c.isdigit())
+    if not 7 <= len(phone_digits) <= 15:
+        return False
+
+    if user.gender not in ["Male", "Female", "Other"]:
+        return False
+
+    allowed_preferences = [
+        "Dating", "Friendship", "Friends with benefits",
+        "Casual connections", "Serious relationship"
+    ]
+    if user.connection_preference not in allowed_preferences:
+        return False
+
+    if len(user.full_name.strip()) < 2:
+        return False
+
+    if len(user.bio.strip()) < 10 or len(user.interests.strip()) < 3:
+        return False
+
+    today = date.today()
+    age = today.year - user.date_of_birth.year - (
+        (today.month, today.day) <
+        (user.date_of_birth.month, user.date_of_birth.day)
+    )
+
+    if user.date_of_birth > today or age < 18:
+        return False
+
+    photo_path = os.path.join(
+        UPLOAD_FOLDER, os.path.basename(user.profile_photo)
+    )
+
+    if not os.path.isfile(photo_path):
+        return False
+
+    try:
+        with Image.open(photo_path) as image:
+            if image.format not in ["JPEG", "PNG", "WEBP"]:
+                return False
+            if image.width < 400 or image.height < 400:
+                return False
+            image.verify()
+    except Exception:
+        return False
+
+    return True
+
+
+def profile_complete_required(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        user = get_current_user()
+
+        if user is None:
+            session.clear()
+            return redirect(url_for("login"))
+
+        if not is_profile_complete(user):
+            flash(
+                "Please complete all required profile information and upload "
+                "a clear photo before using member features.",
+                "warning"
+            )
+            return redirect(url_for("profile"))
+
+        return function(*args, **kwargs)
+
+    return wrapper
+
+
+def members_blocked_either_way(first_user_id, second_user_id):
+    """Return True if either member has blocked the other."""
+    if first_user_id == second_user_id:
+        return False
+
+    return MemberBlock.query.filter(
+        or_(
+            and_(
+                MemberBlock.blocker_id == first_user_id,
+                MemberBlock.blocked_id == second_user_id
+            ),
+            and_(
+                MemberBlock.blocker_id == second_user_id,
+                MemberBlock.blocked_id == first_user_id
+            )
+        )
+    ).first() is not None
+
+
+def get_video_duration(file_path):
+    """Measure video duration using FFprobe, not browser-supplied metadata."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                file_path
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=15
+        )
+
+        duration = float(result.stdout.strip())
+
+        if not math.isfinite(duration) or duration <= 0:
+            return None
+
+        return duration
+
+    except (
+        subprocess.SubprocessError,
+        FileNotFoundError,
+        ValueError,
+        OSError
+    ):
+        return None
+
+
+def get_membership_status(user):
+    """Return the member's current trial or paid subscription status."""
+    now = datetime.utcnow()
+
+    subscription = Subscription.query.filter_by(user_id=user.id).first()
+
+    if (
+        subscription
+        and subscription.status == "active"
+        and subscription.current_period_end
+        and subscription.current_period_end > now
+    ):
+        expiry = subscription.current_period_end
+        membership_type = "paid"
+    elif user.trial_ends_at and user.trial_ends_at > now:
+        expiry = user.trial_ends_at
+        membership_type = "trial"
+    else:
+        return {
+            "active": False,
+            "type": "expired",
+            "expires_at": None,
+            "days_remaining": 0
+        }
+
+    seconds_remaining = (expiry - now).total_seconds()
+
+    return {
+        "active": True,
+        "type": membership_type,
+        "expires_at": expiry,
+        "days_remaining": int((seconds_remaining + 86399) // 86400)
+    }
+
+
+def subscription_required(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        user = get_current_user()
+
+        if user is None:
+            session.clear()
+            return redirect(url_for("login"))
+
+        if not get_membership_status(user)["active"]:
+            flash(
+                "Your free trial or subscription has expired. "
+                "Please choose a membership plan to continue.",
+                "warning"
+            )
+            return redirect(url_for("subscription"))
+
+        return function(*args, **kwargs)
+
+    return wrapper
 
 
 def add_months(original_date, months):
@@ -309,6 +829,15 @@ def verify_and_complete_payment(reference):
         if owner is None or owner.id == payment.user_id:
             raise ValueError("Invalid contact unlock account.")
 
+        now = datetime.utcnow()
+
+        if members_blocked_either_way(payment.user_id, owner.id):
+            payment.status = "success"
+            payment.provider_transaction_id = str(transaction.get("id", ""))
+            payment.paid_at = now
+            db.session.commit()
+            return payment
+
         if not owner.contact_sharing_enabled or not owner.phone:
             raise ValueError("This member is not sharing their phone number.")
 
@@ -317,21 +846,33 @@ def verify_and_complete_payment(reference):
             profile_owner_id=owner.id
         ).first()
 
+        now = datetime.utcnow()
+        expires = now + timedelta(minutes=5)
+
         if existing_unlock is None:
-            db.session.add(ContactUnlock(
+            existing_unlock = ContactUnlock(
                 buyer_id=payment.user_id,
                 profile_owner_id=owner.id,
-                payment_id=payment.id
-            ))
+                payment_id=payment.id,
+                created_at=now,
+                expires_at=expires
+            )
+            db.session.add(existing_unlock)
+        else:
+            existing_unlock.payment_id = payment.id
+            existing_unlock.created_at = now
+            existing_unlock.expires_at = expires
 
         payment.status = "success"
         payment.provider_transaction_id = str(transaction.get("id", ""))
-        payment.paid_at = datetime.utcnow()
+        payment.paid_at = now
+
         db.session.commit()
         return payment
 
     if payment.purpose not in (
         "subscription_1_month",
+        "subscription_5_months",
         "subscription_6_months",
         "subscription_12_months"
     ):
@@ -344,6 +885,7 @@ def verify_and_complete_payment(reference):
 
     months_by_purpose = {
         "subscription_1_month": 1,
+        "subscription_5_months": 5,
         "subscription_6_months": 6,
         "subscription_12_months": 12
     }
@@ -403,10 +945,7 @@ def verify_and_complete_payment(reference):
 
 @app.route("/")
 def home():
-    if "user_id" in session:
-        return redirect(url_for("dashboard"))
-
-    return redirect(url_for("login"))
+    return render_template("index.html")
 
 
 # --------------------------------------------------
@@ -416,12 +955,10 @@ def home():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip().lower()
         phone = request.form.get("phone", "").strip()
         dob_text = request.form.get("date_of_birth", "")
-
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
 
@@ -438,33 +975,22 @@ def register():
             return redirect(url_for("register"))
 
         try:
-            dob = datetime.strptime(
-                dob_text,
-                "%Y-%m-%d"
-            ).date()
-
+            dob = datetime.strptime(dob_text, "%Y-%m-%d").date()
         except ValueError:
             flash("Please enter a valid date of birth.", "error")
             return redirect(url_for("register"))
 
         today = date.today()
-
         age = today.year - dob.year - (
             (today.month, today.day) < (dob.month, dob.day)
         )
 
         if dob > today or age < 18:
-            flash(
-                "Nexa is only available to people aged 18 and above.",
-                "error"
-            )
+            flash("Nexa is only available to people aged 18 and above.", "error")
             return redirect(url_for("register"))
 
         if len(password) < 8:
-            flash(
-                "Password must contain at least 8 characters.",
-                "error"
-            )
+            flash("Password must contain at least 8 characters.", "error")
             return redirect(url_for("register"))
 
         if password != confirm_password:
@@ -472,10 +998,7 @@ def register():
             return redirect(url_for("register"))
 
         if User.query.filter_by(email=email).first():
-            flash(
-                "An account with this email already exists.",
-                "error"
-            )
+            flash("An account with this email already exists.", "error")
             return redirect(url_for("register"))
 
         user = User(
@@ -483,7 +1006,8 @@ def register():
             email=email,
             phone=phone,
             date_of_birth=dob,
-            contact_sharing_enabled=False
+            contact_sharing_enabled=False,
+            email_verified=False
         )
 
         user.set_password(password)
@@ -492,37 +1016,138 @@ def register():
         db.session.commit()
 
         session.clear()
-        session["user_id"] = user.id
+        session["pending_verification_email"] = user.email
 
-        flash(
-            "Your account has been created. Your 7-day trial has started.",
-            "success"
-        )
+        try:
+            email_sent = send_verification_email(user)
+        except Exception:
+            app.logger.exception("Could not send verification email.")
+            email_sent = False
 
-        return redirect(url_for("dashboard"))
+        if email_sent:
+            flash("Account created. Check your email for the verification link.", "success")
+        else:
+            flash(
+                "Your account was created, but the email could not be sent. "
+                "Please configure email delivery and use Resend Verification.",
+                "warning"
+            )
+
+        return redirect(url_for("verification_pending"))
 
     return render_template("auth/register.html")
 
 
-# --------------------------------------------------
-# LOGIN
-# --------------------------------------------------
+def send_verification_email(user):
+    token = generate_email_token(user)
+    verification_url = url_for(
+        "verify_email",
+        token=token,
+        _external=True
+    )
+
+    body = (
+        f"Hello {user.full_name},\n\n"
+        "Welcome to Nexa. Please verify your email address by opening this link:\n\n"
+        f"{verification_url}\n\n"
+        "This link expires after one hour. If you did not create this account, "
+        "you can ignore this email.\n\n"
+        "Nexa Team"
+    )
+
+    return send_nexa_email(
+        user.email,
+        "Verify your Nexa email address",
+        body
+    )
+
+
+@app.route("/verification-pending")
+def verification_pending():
+    email = session.get("pending_verification_email")
+
+    return render_template(
+        "auth/verification_pending.html",
+        email=email
+    )
+
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    try:
+        data = verify_email_token(token)
+    except SignatureExpired:
+        flash("This verification link has expired. Please request another.", "error")
+        return redirect(url_for("verification_pending"))
+    except BadSignature:
+        flash("This verification link is invalid.", "error")
+        return redirect(url_for("login"))
+
+    user = db.session.get(User, data.get("user_id"))
+
+    if user is None or user.email != data.get("email"):
+        flash("This verification link is invalid.", "error")
+        return redirect(url_for("login"))
+
+    if user.email_verified:
+        flash("Your email is already verified. Please sign in.", "success")
+        return redirect(url_for("login"))
+
+    user.email_verified = True
+    user.email_verified_at = datetime.utcnow()
+    db.session.commit()
+
+    session.clear()
+
+    flash("Your email has been verified. You can now sign in.", "success")
+    return redirect(url_for("login"))
+
+
+@app.route("/resend-verification", methods=["POST"])
+def resend_verification():
+    email = session.get("pending_verification_email", "").strip().lower()
+
+    if not email:
+        email = request.form.get("email", "").strip().lower()
+
+    user = User.query.filter_by(email=email).first() if email else None
+
+    if user and not user.email_verified:
+        session["pending_verification_email"] = user.email
+
+        try:
+            if send_verification_email(user):
+                flash("A new verification link has been sent.", "success")
+            else:
+                flash("Email delivery is not configured yet. Please try again later.", "warning")
+        except Exception:
+            app.logger.exception("Could not resend verification email.")
+            flash("We could not send the email. Please try again later.", "error")
+    else:
+        flash("If the account needs verification, a new link can be requested.", "info")
+
+    return redirect(url_for("verification_pending"))
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
 
         user = User.query.filter_by(email=email).first()
 
         if user and user.check_password(password):
+            if not user.email_verified:
+                session.clear()
+                session["pending_verification_email"] = user.email
+                flash("Please verify your email before signing in.", "warning")
+                return redirect(url_for("verification_pending"))
+
             session.clear()
             session["user_id"] = user.id
 
             flash("Welcome back to Nexa.", "success")
-
             return redirect(url_for("dashboard"))
 
         flash("Incorrect email or password.", "error")
@@ -531,6 +1156,112 @@ def login():
 
 
 # --------------------------------------------------
+# PASSWORD RESET
+# --------------------------------------------------
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip().lower()
+        user = User.query.filter_by(email=email).first()
+
+        # Give the same response whether or not the email exists.
+        if user:
+            token = email_serializer.dumps(
+                {"user_id": user.id, "email": user.email},
+                salt="nexa-password-reset"
+            )
+
+            user.password_reset_token_hash = hashlib.sha256(
+                token.encode("utf-8")
+            ).hexdigest()
+
+            db.session.commit()
+
+            reset_url = url_for(
+                "reset_password",
+                token=token,
+                _external=True
+            )
+
+            body = (
+                f"Hello {user.full_name},\\n\\n"
+                "We received a request to reset your Nexa password.\\n\\n"
+                "Open this link to choose a new password. "
+                "It expires after 30 minutes and can only be used once:\\n\\n"
+                f"{reset_url}\\n\\n"
+                "If you did not request this, you can ignore this email.\\n\\n"
+                "Nexa Team"
+            )
+
+            try:
+                send_nexa_email(
+                    user.email,
+                    "Reset your Nexa password",
+                    body
+                )
+            except Exception:
+                app.logger.exception("Could not send password reset email.")
+
+        flash(
+            "If an account exists with that email, password reset instructions "
+            "will be sent.",
+            "info"
+        )
+        return redirect(url_for("login"))
+
+    return render_template("auth/forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    try:
+        data = email_serializer.loads(
+            token,
+            salt="nexa-password-reset",
+            max_age=1800
+        )
+    except SignatureExpired:
+        flash("This password reset link has expired. Request another one.", "error")
+        return redirect(url_for("forgot_password"))
+    except BadSignature:
+        flash("This password reset link is invalid.", "error")
+        return redirect(url_for("forgot_password"))
+
+    user = db.session.get(User, data.get("user_id"))
+
+    if user is None or user.email != data.get("email"):
+        flash("This password reset link is invalid.", "error")
+        return redirect(url_for("forgot_password"))
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    if user.password_reset_token_hash != token_hash:
+        flash("This password reset link has already been used or replaced.", "error")
+        return redirect(url_for("forgot_password"))
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        if len(password) < 8:
+            flash("Password must contain at least 8 characters.", "error")
+            return render_template("auth/reset_password.html", token=token)
+
+        if password != confirm_password:
+            flash("Your passwords do not match.", "error")
+            return render_template("auth/reset_password.html", token=token)
+
+        user.set_password(password)
+        user.password_reset_token_hash = None
+        db.session.commit()
+
+        flash("Your password has been changed. You can now sign in.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("auth/reset_password.html", token=token)
+
+
 # DASHBOARD
 # --------------------------------------------------
 
@@ -543,19 +1274,657 @@ def dashboard():
         session.clear()
         return redirect(url_for("login"))
 
-    remaining = max(
-        0,
-        (user.trial_ends_at - datetime.utcnow()).days
-    )
+    membership = get_membership_status(user)
+
+    pending_request_count = ConnectionRequest.query.filter_by(
+        receiver_id=user.id,
+        status="pending"
+    ).count()
+
+    unread_notification_count = Notification.query.filter_by(
+        user_id=user.id,
+        is_read=False
+    ).count()
 
     return render_template(
         "dashboard.html",
         user=user,
-        trial_days_remaining=remaining
+        membership=membership,
+        pending_request_count=pending_request_count,
+        unread_notification_count=unread_notification_count,
+        profile_complete=is_profile_complete(user),
+        trial_days_remaining=(
+            membership["days_remaining"]
+            if membership["type"] == "trial"
+            else 0
+        )
     )
 
 
 # --------------------------------------------------
+# NEXA STATUS
+# --------------------------------------------------
+
+def cleanup_expired_statuses():
+    """Delete expired Status records and their private media files."""
+    now = datetime.utcnow()
+
+    expired_statuses = Status.query.filter(
+        Status.expires_at <= now
+    ).all()
+
+    for status in expired_statuses:
+        if status.filename:
+            filename = os.path.basename(status.filename)
+            file_path = os.path.join(STATUS_UPLOAD_FOLDER, filename)
+
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    app.logger.exception(
+                        "Could not delete expired Status media."
+                    )
+
+        db.session.delete(status)
+
+    if expired_statuses:
+        db.session.commit()
+
+
+@app.route("/status")
+@login_required
+def status_feed():
+    current_user = get_current_user()
+
+    if current_user is None:
+        session.clear()
+        return redirect(url_for("login"))
+
+    cleanup_expired_statuses()
+
+    # Collect members who have blocked the current member,
+    # or whom the current member has blocked.
+    blocks = MemberBlock.query.filter(
+        or_(
+            MemberBlock.blocker_id == current_user.id,
+            MemberBlock.blocked_id == current_user.id
+        )
+    ).all()
+
+    blocked_member_ids = set()
+
+    for block in blocks:
+        if block.blocker_id == current_user.id:
+            blocked_member_ids.add(block.blocked_id)
+        else:
+            blocked_member_ids.add(block.blocker_id)
+
+    now = datetime.utcnow()
+
+    records = (
+        db.session.query(Status, User)
+        .join(User, Status.user_id == User.id)
+        .filter(
+            Status.expires_at > now,
+            User.email_verified.is_(True)
+        )
+        .order_by(Status.uploaded_at.desc())
+        .all()
+    )
+
+    grouped = {}
+
+    for status, member in records:
+
+        if member.id in blocked_member_ids:
+            continue
+
+        if member.id not in grouped:
+            grouped[member.id] = {
+                "member": member,
+                "statuses": []
+            }
+
+        grouped[member.id]["statuses"].append(status)
+
+    # Always display the current member's Status first,
+    # even when they have not uploaded anything yet.
+    own_group = grouped.pop(
+        current_user.id,
+        {
+            "member": current_user,
+            "statuses": []
+        }
+    )
+
+    other_groups = list(grouped.values())
+
+    # Members with the newest Status updates appear first.
+    other_groups.sort(
+        key=lambda group: group["statuses"][0].uploaded_at,
+        reverse=True
+    )
+
+    status_groups = [own_group] + other_groups
+
+    return render_template(
+        "status.html",
+        user=current_user,
+        status_groups=status_groups,
+        now=now
+    )
+
+
+@app.route("/status/upload", methods=["POST"])
+@login_required
+@profile_complete_required
+def upload_status():
+    current_user = get_current_user()
+
+    if current_user is None:
+        session.clear()
+        return redirect(url_for("login"))
+
+    cleanup_expired_statuses()
+
+    uploaded_files = [
+        media
+        for media in request.files.getlist("media_files")
+        if media and media.filename
+    ]
+
+    text_content = request.form.get("text_content", "").strip()
+    caption = request.form.get("caption", "").strip()
+    background_color = request.form.get(
+        "background_color", "#5631A8"
+    ).strip().upper()
+
+    allowed_backgrounds = {
+        "#5631A8", "#7B2CBF", "#C2185B",
+        "#D35400", "#167D63", "#2457A7",
+        "#202124", "#8A6D1D"
+    }
+
+    if background_color not in allowed_backgrounds:
+        background_color = "#5631A8"
+
+    if not uploaded_files and not text_content:
+        flash("Write a Status message or select a picture or video.", "error")
+        return redirect(url_for("status_feed"))
+
+    if len(text_content) > 1000 or len(caption) > 500:
+        flash("Status text is too long. Please shorten your message.", "error")
+        return redirect(url_for("status_feed"))
+
+    if len(uploaded_files) > 20:
+        flash("You can upload a maximum of 20 files at once.", "error")
+        return redirect(url_for("status_feed"))
+
+    saved_files = []
+    new_statuses = []
+    now = datetime.utcnow()
+
+    allowed_image_formats = {
+        "JPEG": ".jpg",
+        "PNG": ".png",
+        "WEBP": ".webp"
+    }
+
+    allowed_video_extensions = {
+        ".mp4", ".mov", ".m4v", ".webm", ".3gp", ".avi", ".mkv"
+    }
+
+    try:
+        if text_content:
+            new_statuses.append(
+                Status(
+                    user_id=current_user.id,
+                    filename="",
+                    media_type="text",
+                    text_content=text_content,
+                    caption=None,
+                    background_color=background_color,
+                    duration_seconds=0.0,
+                    uploaded_at=now,
+                    expires_at=now + timedelta(hours=24)
+                )
+            )
+
+        for media in uploaded_files:
+
+            original_name = secure_filename(media.filename)
+            extension = os.path.splitext(original_name)[1].lower()
+
+            temporary_name = f".{uuid.uuid4().hex}.upload"
+            temporary_path = os.path.join(
+                STATUS_UPLOAD_FOLDER,
+                temporary_name
+            )
+
+            media.save(temporary_path)
+            saved_files.append(temporary_path)
+
+            file_size = os.path.getsize(temporary_path)
+
+            if file_size <= 0:
+                raise ValueError("One of your selected files is empty.")
+
+            if file_size > STATUS_MAX_FILE_SIZE:
+                raise ValueError(
+                    "Each Status file must be 25 MB or smaller."
+                )
+
+            media_type = None
+            duration = 0.0
+            final_extension = None
+
+            if extension in {".jpg", ".jpeg", ".png", ".webp"}:
+
+                try:
+                    with Image.open(temporary_path) as image:
+                        image_format = image.format
+                        image.verify()
+
+                    if image_format not in allowed_image_formats:
+                        raise ValueError("Unsupported picture format.")
+
+                    media_type = "image"
+                    final_extension = allowed_image_formats[image_format]
+
+                except (OSError, Image.DecompressionBombError):
+                    raise ValueError(
+                        "One of your pictures is invalid or damaged."
+                    )
+
+            elif extension in allowed_video_extensions:
+
+                media_type = "video"
+                duration = get_video_duration(temporary_path)
+
+                if duration is None:
+                    raise ValueError(
+                        "One of your videos could not be read."
+                    )
+
+                if duration > STATUS_MAX_VIDEO_DURATION:
+                    raise ValueError(
+                        "Videos must not exceed 12 seconds."
+                    )
+
+                final_extension = extension
+
+            else:
+                raise ValueError(
+                    "Unsupported file. Use JPEG, PNG, WEBP, MP4, MOV, "
+                    "M4V, WEBM, 3GP, AVI or MKV."
+                )
+
+            final_name = f"{uuid.uuid4().hex}{final_extension}"
+            final_path = os.path.join(
+                STATUS_UPLOAD_FOLDER,
+                final_name
+            )
+
+            os.replace(temporary_path, final_path)
+
+            saved_files.remove(temporary_path)
+            saved_files.append(final_path)
+
+            new_statuses.append(
+                Status(
+                    user_id=current_user.id,
+                    filename=final_name,
+                    media_type=media_type,
+                    text_content=None,
+                    caption=caption or None,
+                    background_color=background_color,
+                    duration_seconds=duration,
+                    uploaded_at=now,
+                    expires_at=now + timedelta(hours=24)
+                )
+            )
+
+        db.session.add_all(new_statuses)
+        db.session.commit()
+
+    except ValueError as error:
+        db.session.rollback()
+
+        for file_path in saved_files:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+
+        flash(str(error), "error")
+        return redirect(url_for("status_feed"))
+
+    except Exception:
+        db.session.rollback()
+
+        for file_path in saved_files:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+
+        app.logger.exception("Status upload failed.")
+        flash("Your Status upload failed. Please try again.", "error")
+        return redirect(url_for("status_feed"))
+
+    flash(
+        f"{len(new_statuses)} Status item(s) uploaded successfully.",
+        "success"
+    )
+
+    return redirect(url_for("status_feed"))
+
+
+@app.route("/status/<int:status_id>/delete", methods=["POST"])
+@login_required
+def delete_status(status_id):
+    current_user = get_current_user()
+
+    status = db.session.get(Status, status_id)
+
+    if status is None or status.user_id != current_user.id:
+        abort(404)
+
+    file_path = None
+
+    if status.filename:
+        filename = os.path.basename(status.filename)
+        file_path = os.path.join(STATUS_UPLOAD_FOLDER, filename)
+
+    db.session.delete(status)
+    db.session.commit()
+
+    if file_path and os.path.isfile(file_path):
+        try:
+            os.remove(file_path)
+        except OSError:
+            app.logger.exception("Could not delete Status media.")
+
+    flash("Your Status has been deleted.", "success")
+    return redirect(url_for("status_feed"))
+
+
+@app.route("/status/media/<int:status_id>")
+@login_required
+def view_status_media(status_id):
+    current_user = get_current_user()
+
+    status = db.session.get(Status, status_id)
+
+    if status is None:
+        abort(404)
+
+    if status.expires_at <= datetime.utcnow():
+        abort(404)
+
+    if members_blocked_either_way(
+        current_user.id,
+        status.user_id
+    ):
+        abort(404)
+
+    owner = db.session.get(User, status.user_id)
+
+    if owner is None or not owner.email_verified:
+        abort(404)
+
+    if status.media_type not in {"image", "video"} or not status.filename:
+        abort(404)
+
+    filename = os.path.basename(status.filename)
+
+    return send_from_directory(
+        STATUS_UPLOAD_FOLDER,
+        filename,
+        as_attachment=False,
+        conditional=True
+    )
+
+
+# --------------------------------------------------
+# PRIVATE MESSAGING
+# --------------------------------------------------
+
+def members_are_connected(first_id, second_id):
+    return ConnectionRequest.query.filter(
+        ConnectionRequest.status == "accepted",
+        or_(
+            and_(
+                ConnectionRequest.sender_id == first_id,
+                ConnectionRequest.receiver_id == second_id
+            ),
+            and_(
+                ConnectionRequest.sender_id == second_id,
+                ConnectionRequest.receiver_id == first_id
+            )
+        )
+    ).first() is not None
+
+
+def members_have_blocked_each_other(first_id, second_id):
+    return MemberBlock.query.filter(
+        or_(
+            and_(
+                MemberBlock.blocker_id == first_id,
+                MemberBlock.blocked_id == second_id
+            ),
+            and_(
+                MemberBlock.blocker_id == second_id,
+                MemberBlock.blocked_id == first_id
+            )
+        )
+    ).first() is not None
+
+
+@app.route("/messages")
+@login_required
+@profile_complete_required
+@subscription_required
+def message_inbox():
+    current_user = get_current_user()
+
+    accepted = ConnectionRequest.query.filter(
+        ConnectionRequest.status == "accepted",
+        or_(
+            ConnectionRequest.sender_id == current_user.id,
+            ConnectionRequest.receiver_id == current_user.id
+        )
+    ).all()
+
+    member_ids = set()
+
+    for connection in accepted:
+        other_id = (
+            connection.receiver_id
+            if connection.sender_id == current_user.id
+            else connection.sender_id
+        )
+
+        if not members_have_blocked_each_other(current_user.id, other_id):
+            member_ids.add(other_id)
+
+    connections = []
+
+    for member_id in member_ids:
+        member = db.session.get(User, member_id)
+
+        if member is None:
+            continue
+
+        last_message = Message.query.filter(
+            or_(
+                and_(
+                    Message.sender_id == current_user.id,
+                    Message.receiver_id == member_id
+                ),
+                and_(
+                    Message.sender_id == member_id,
+                    Message.receiver_id == current_user.id
+                )
+            )
+        ).order_by(Message.created_at.desc()).first()
+
+        unread_count = Message.query.filter_by(
+            sender_id=member_id,
+            receiver_id=current_user.id,
+            read_at=None
+        ).count()
+
+        connections.append({
+            "member": member,
+            "last_message": last_message,
+            "unread_count": unread_count
+        })
+
+    connections.sort(
+        key=lambda item: item["last_message"].created_at
+        if item["last_message"] else datetime.min,
+        reverse=True
+    )
+
+    return render_template("messages.html", connections=connections)
+
+
+@app.route("/messages/<int:member_id>", methods=["GET", "POST"])
+@login_required
+@profile_complete_required
+@subscription_required
+def conversation(member_id):
+    current_user = get_current_user()
+
+    if member_id == current_user.id:
+        abort(404)
+
+    member = db.session.get(User, member_id)
+
+    if member is None:
+        abort(404)
+
+    if not members_are_connected(current_user.id, member_id):
+        abort(403)
+
+    if members_have_blocked_each_other(current_user.id, member_id):
+        abort(403)
+
+    if request.method == "POST":
+        body = request.form.get("body", "").strip()
+
+        if not body:
+            flash("Please enter a message.", "error")
+            return redirect(url_for("conversation", member_id=member_id))
+
+        if len(body) > 2000:
+            flash("Messages cannot exceed 2,000 characters.", "error")
+            return redirect(url_for("conversation", member_id=member_id))
+
+        new_message = Message(
+            sender_id=current_user.id,
+            receiver_id=member_id,
+            body=body
+        )
+
+        new_notification = Notification(
+            user_id=member_id,
+            actor_id=current_user.id,
+            notification_type="new_message",
+            message=f"You have a new message from {current_user.full_name}.",
+            target_url=url_for("conversation", member_id=current_user.id),
+            is_read=False
+        )
+
+        db.session.add(new_message)
+        db.session.add(new_notification)
+        db.session.commit()
+
+        return redirect(url_for("conversation", member_id=member_id))
+
+    messages = Message.query.filter(
+        or_(
+            and_(
+                Message.sender_id == current_user.id,
+                Message.receiver_id == member_id
+            ),
+            and_(
+                Message.sender_id == member_id,
+                Message.receiver_id == current_user.id
+            )
+        )
+    ).order_by(Message.created_at.asc()).all()
+
+    unread = Message.query.filter_by(
+        sender_id=member_id,
+        receiver_id=current_user.id,
+        read_at=None
+    ).all()
+
+    for item in unread:
+        item.read_at = datetime.utcnow()
+
+    if unread:
+        db.session.commit()
+
+    return render_template(
+        "conversation.html",
+        member=member,
+        messages=messages,
+        current_user=current_user
+    )
+
+
+# NOTIFICATIONS
+# --------------------------------------------------
+
+@app.route("/notifications")
+@login_required
+def notifications():
+    current_user = get_current_user()
+
+    user_notifications = Notification.query.filter_by(
+        user_id=current_user.id
+    ).order_by(
+        Notification.created_at.desc()
+    ).all()
+
+    unread_count = Notification.query.filter_by(
+        user_id=current_user.id,
+        is_read=False
+    ).count()
+
+    return render_template(
+        "notifications.html",
+        notifications=user_notifications,
+        unread_count=unread_count
+    )
+
+
+@app.route("/notifications/read/<int:notification_id>", methods=["POST"])
+@login_required
+def read_notification(notification_id):
+    current_user = get_current_user()
+
+    notification = Notification.query.filter_by(
+        id=notification_id,
+        user_id=current_user.id
+    ).first()
+
+    if notification is None:
+        flash("Notification not found.", "error")
+        return redirect(url_for("notifications"))
+
+    notification.is_read = True
+    db.session.commit()
+
+    target = notification.target_url or url_for("notifications")
+
+    # Only allow internal application links.
+    if not target.startswith("/") or target.startswith("//"):
+        target = url_for("notifications")
+
+    return redirect(target)
+
+
 # PROFILE
 # --------------------------------------------------
 
@@ -598,8 +1967,32 @@ def profile():
             "connection_preference", ""
         )
 
-        if preference in allowed_preferences:
-            user.connection_preference = preference
+        if preference not in allowed_preferences:
+            flash("Please select a valid connection preference.", "error")
+            return redirect(url_for("profile"))
+
+        user.connection_preference = preference
+
+        if user.gender not in ["Male", "Female", "Other"]:
+            flash("Please select your gender.", "error")
+            return redirect(url_for("profile"))
+
+        if not user.location or len(user.location) < 2:
+            flash("Please enter your correct city and state.", "error")
+            return redirect(url_for("profile"))
+
+        if len(user.bio) < 10:
+            flash("Your About Me section must contain at least 10 characters.", "error")
+            return redirect(url_for("profile"))
+
+        if len(user.interests) < 3:
+            flash("Please enter your interests.", "error")
+            return redirect(url_for("profile"))
+
+        photo = request.files.get("profile_photo")
+        if not user.profile_photo and (not photo or not photo.filename):
+            flash("Please upload a clear profile photo.", "error")
+            return redirect(url_for("profile"))
 
         user.contact_sharing_enabled = (
             request.form.get("contact_sharing_enabled") == "yes"
@@ -617,6 +2010,9 @@ def profile():
 
                 if image.format not in ["JPEG", "PNG", "WEBP"]:
                     raise ValueError("Unsupported image format.")
+
+                if image.width < 400 or image.height < 400:
+                    raise ValueError("Image must be at least 400 by 400 pixels.")
 
                 extension = {
                     "JPEG": ".jpg",
@@ -656,6 +2052,15 @@ def profile():
 
                 return redirect(url_for("profile"))
 
+        if not is_profile_complete(user):
+            db.session.rollback()
+            flash(
+                "Your profile is incomplete. Check every required field "
+                "and upload a valid photo of at least 400 by 400 pixels.",
+                "error"
+            )
+            return redirect(url_for("profile"))
+
         db.session.commit()
 
         flash("Your profile has been updated.", "success")
@@ -671,6 +2076,7 @@ def profile():
 
 @app.route("/discover")
 @login_required
+@profile_complete_required
 def discover():
     current_user = get_current_user()
 
@@ -770,6 +2176,7 @@ def discover():
 
 @app.route("/member/<int:user_id>")
 @login_required
+@profile_complete_required
 def member_profile(user_id):
     current_user = get_current_user()
 
@@ -797,18 +2204,412 @@ def member_profile(user_id):
         flash("This profile is unavailable.", "error")
         return redirect(url_for("discover"))
 
+    is_blocked_by_me = MemberBlock.query.filter_by(
+        blocker_id=current_user.id,
+        blocked_id=member.id
+    ).first() is not None
+
+    is_blocked_by_member = MemberBlock.query.filter_by(
+        blocker_id=member.id,
+        blocked_id=current_user.id
+    ).first() is not None
+
+    if is_blocked_by_member:
+        flash("You cannot view this member's profile.", "error")
+        return redirect(url_for("discover"))
+
+    connection_request = ConnectionRequest.query.filter(
+        db.or_(
+            db.and_(
+                ConnectionRequest.sender_id == current_user.id,
+                ConnectionRequest.receiver_id == member.id
+            ),
+            db.and_(
+                ConnectionRequest.sender_id == member.id,
+                ConnectionRequest.receiver_id == current_user.id
+            )
+        )
+    ).first()
+
+    connection_status = "none"
+    request_direction = None
+
+    if connection_request:
+        connection_status = connection_request.status
+
+        if connection_request.sender_id == current_user.id:
+            request_direction = "sent"
+        else:
+            request_direction = "received"
+
+    now = datetime.utcnow()
+
+    active_contact_unlock = ContactUnlock.query.filter(
+        ContactUnlock.buyer_id == current_user.id,
+        ContactUnlock.profile_owner_id == member.id,
+        ContactUnlock.expires_at > now
+    ).first()
+
     return render_template(
         "member_profile.html",
         user=current_user,
         member=member,
         age=age,
-        contact_unlocked=(
-            ContactUnlock.query.filter_by(
-                buyer_id=current_user.id,
-                profile_owner_id=member.id
-            ).first() is not None
+        is_blocked_by_me=is_blocked_by_me,
+        is_blocked_by_member=is_blocked_by_member,
+        connection_status=connection_status,
+        request_direction=request_direction,
+        subscriber_access=get_membership_status(current_user)["active"],
+        contact_unlocked=active_contact_unlock is not None,
+        contact_unlock_expires_at=(
+            active_contact_unlock.expires_at.isoformat()
+            if active_contact_unlock else None
         )
     )
+
+
+# --------------------------------------------------
+
+
+# --------------------------------------------------
+# MEMBER BLOCKING AND REPORTING
+# --------------------------------------------------
+
+@app.route("/member/<int:user_id>/block", methods=["POST"])
+@login_required
+@profile_complete_required
+def block_member(user_id):
+    current_user = get_current_user()
+
+    if user_id == current_user.id:
+        flash("You cannot block yourself.", "error")
+        return redirect(url_for("dashboard"))
+
+    member = db.session.get(User, user_id)
+
+    if member is None:
+        flash("Member not found.", "error")
+        return redirect(url_for("discover"))
+
+    existing_block = MemberBlock.query.filter_by(
+        blocker_id=current_user.id,
+        blocked_id=user_id
+    ).first()
+
+    if existing_block:
+        flash("You have already blocked this member.", "info")
+    else:
+        db.session.add(MemberBlock(
+            blocker_id=current_user.id,
+            blocked_id=user_id
+        ))
+
+        # Remove pending and accepted connections in either direction.
+        # Rejected request history is preserved.
+        ConnectionRequest.query.filter(
+            or_(
+                and_(
+                    ConnectionRequest.sender_id == current_user.id,
+                    ConnectionRequest.receiver_id == user_id
+                ),
+                and_(
+                    ConnectionRequest.sender_id == user_id,
+                    ConnectionRequest.receiver_id == current_user.id
+                )
+            ),
+            ConnectionRequest.status.in_(["pending", "accepted"])
+        ).delete(synchronize_session=False)
+
+        db.session.commit()
+        flash("Member blocked successfully.", "success")
+
+    return redirect(url_for("member_profile", user_id=user_id))
+
+
+@app.route("/member/<int:user_id>/unblock", methods=["POST"])
+@login_required
+@profile_complete_required
+def unblock_member(user_id):
+    current_user = get_current_user()
+
+    block = MemberBlock.query.filter_by(
+        blocker_id=current_user.id,
+        blocked_id=user_id
+    ).first()
+
+    if block:
+        db.session.delete(block)
+        db.session.commit()
+        flash("Member unblocked successfully.", "success")
+    else:
+        flash("This member is not on your block list.", "info")
+
+    return redirect(url_for("member_profile", user_id=user_id))
+
+
+@app.route("/member/<int:user_id>/report", methods=["POST"])
+@login_required
+@profile_complete_required
+def report_member(user_id):
+    current_user = get_current_user()
+
+    if user_id == current_user.id:
+        flash("You cannot report yourself.", "error")
+        return redirect(url_for("dashboard"))
+
+    member = db.session.get(User, user_id)
+
+    if member is None:
+        flash("Member not found.", "error")
+        return redirect(url_for("discover"))
+
+    reason = request.form.get("reason", "").strip()
+    details = request.form.get("details", "").strip()
+
+    allowed_reasons = {
+        "Fake profile",
+        "Harassment or bullying",
+        "Inappropriate content",
+        "Scam or fraud",
+        "Threatening behaviour",
+        "Other"
+    }
+
+    if reason not in allowed_reasons:
+        flash("Please select a valid report reason.", "error")
+        return redirect(url_for("member_profile", user_id=user_id))
+
+    if len(details) > 1000:
+        flash("Report details cannot exceed 1,000 characters.", "error")
+        return redirect(url_for("member_profile", user_id=user_id))
+
+    existing_report = MemberReport.query.filter_by(
+        reporter_id=current_user.id,
+        reported_user_id=user_id,
+        status="pending"
+    ).first()
+
+    if existing_report:
+        flash("You already have a pending report for this member.", "info")
+    else:
+        db.session.add(MemberReport(
+            reporter_id=current_user.id,
+            reported_user_id=user_id,
+            reason=reason,
+            details=details or None
+        ))
+        db.session.commit()
+        flash("Your report has been submitted for review.", "success")
+
+    return redirect(url_for("member_profile", user_id=user_id))
+
+
+# CONNECTION REQUEST ROUTE
+# --------------------------------------------------
+
+@app.route("/connection/send/<int:receiver_id>", methods=["POST"])
+@login_required
+@profile_complete_required
+def send_connection_request(receiver_id):
+    current_user = get_current_user()
+
+    if current_user is None:
+        session.clear()
+        return redirect(url_for("login"))
+
+    if receiver_id == current_user.id:
+        flash("You cannot send a connection request to yourself.", "error")
+        return redirect(url_for("discover"))
+
+    if members_have_blocked_each_other(current_user.id, receiver_id):
+        flash("You cannot send a connection request to this member.", "error")
+        return redirect(url_for("discover"))
+
+    receiver = db.session.get(User, receiver_id)
+
+    if receiver is None or not receiver.date_of_birth:
+        flash("This member could not be found.", "error")
+        return redirect(url_for("discover"))
+
+    today = date.today()
+    receiver_age = today.year - receiver.date_of_birth.year - (
+        (today.month, today.day) <
+        (receiver.date_of_birth.month, receiver.date_of_birth.day)
+    )
+
+    if receiver_age < 18:
+        flash("You can only connect with adult members.", "error")
+        return redirect(url_for("discover"))
+
+    existing_request = ConnectionRequest.query.filter(
+        db.or_(
+            db.and_(
+                ConnectionRequest.sender_id == current_user.id,
+                ConnectionRequest.receiver_id == receiver_id
+            ),
+            db.and_(
+                ConnectionRequest.sender_id == receiver_id,
+                ConnectionRequest.receiver_id == current_user.id
+            )
+        )
+    ).all()
+
+    for request in existing_request:
+        if request.status == "accepted":
+            flash("You are already connected with this member.", "info")
+            return redirect(url_for("member_profile", user_id=receiver_id))
+
+        if (
+            request.sender_id == current_user.id
+            and request.status == "pending"
+        ):
+            flash("You have already sent this member a request.", "info")
+            return redirect(url_for("member_profile", user_id=receiver_id))
+
+        if (
+            request.sender_id == receiver_id
+            and request.status == "pending"
+        ):
+            flash("This member has already sent you a request. Check your requests.", "info")
+            return redirect(url_for("member_profile", user_id=receiver_id))
+
+    previous_request = ConnectionRequest.query.filter_by(
+        sender_id=current_user.id,
+        receiver_id=receiver_id
+    ).first()
+
+    if previous_request:
+        previous_request.status = "pending"
+        previous_request.created_at = datetime.utcnow()
+        previous_request.responded_at = None
+    else:
+        new_request = ConnectionRequest(
+            sender_id=current_user.id,
+            receiver_id=receiver_id,
+            status="pending"
+        )
+        db.session.add(new_request)
+
+    db.session.commit()
+
+    flash("Connection request sent successfully.", "success")
+    return redirect(url_for("member_profile", user_id=receiver_id))
+
+
+# --------------------------------------------------
+# CONNECTION REQUESTS: INBOX, ACCEPT AND REJECT
+# --------------------------------------------------
+
+@app.route("/connections/requests")
+@login_required
+@profile_complete_required
+def connection_requests():
+    current_user = get_current_user()
+
+    if current_user is None:
+        session.clear()
+        return redirect(url_for("login"))
+
+    pending_requests = ConnectionRequest.query.filter_by(
+        receiver_id=current_user.id,
+        status="pending"
+    ).order_by(
+        ConnectionRequest.created_at.desc()
+    ).all()
+
+    request_items = []
+
+    for connection_request in pending_requests:
+        sender = db.session.get(User, connection_request.sender_id)
+
+        if sender:
+            request_items.append({
+                "request": connection_request,
+                "sender": sender
+            })
+
+    return render_template(
+        "connection_requests.html",
+        user=current_user,
+        requests=request_items
+    )
+
+
+@app.route("/connection/accept/<int:request_id>", methods=["POST"])
+@login_required
+@profile_complete_required
+def accept_connection_request(request_id):
+    current_user = get_current_user()
+
+    connection_request = db.session.get(
+        ConnectionRequest,
+        request_id
+    )
+
+    if (
+        connection_request is None
+        or connection_request.receiver_id != current_user.id
+        or connection_request.status != "pending"
+    ):
+        flash("This connection request is unavailable.", "error")
+        return redirect(url_for("connection_requests"))
+
+    sender = db.session.get(User, connection_request.sender_id)
+
+    if sender is None:
+        flash("The member who sent this request could not be found.", "error")
+        return redirect(url_for("connection_requests"))
+
+    if members_have_blocked_each_other(current_user.id, sender.id):
+        db.session.delete(connection_request)
+        db.session.commit()
+        flash("This connection request is no longer available.", "error")
+        return redirect(url_for("connection_requests"))
+
+    connection_request.status = "accepted"
+    connection_request.responded_at = datetime.utcnow()
+
+    notification = Notification(
+        user_id=sender.id,
+        actor_id=current_user.id,
+        notification_type="connection_accepted",
+        message=f"Your connection request to {current_user.full_name} has been accepted.",
+        target_url=url_for("member_profile", user_id=current_user.id)
+    )
+
+    db.session.add(notification)
+    db.session.commit()
+
+    flash("Connection request accepted.", "success")
+    return redirect(url_for("connection_requests"))
+
+
+@app.route("/connection/reject/<int:request_id>", methods=["POST"])
+@login_required
+@profile_complete_required
+def reject_connection_request(request_id):
+    current_user = get_current_user()
+
+    connection_request = db.session.get(
+        ConnectionRequest,
+        request_id
+    )
+
+    if (
+        connection_request is None
+        or connection_request.receiver_id != current_user.id
+        or connection_request.status != "pending"
+    ):
+        flash("This connection request is unavailable.", "error")
+        return redirect(url_for("connection_requests"))
+
+    connection_request.status = "rejected"
+    connection_request.responded_at = datetime.utcnow()
+
+    db.session.commit()
+
+    flash("Connection request rejected.", "info")
+    return redirect(url_for("connection_requests"))
 
 
 # --------------------------------------------------
@@ -893,7 +2694,7 @@ def initialize_payment(plan_code):
 
     purpose = {
         "1_month": "subscription_1_month",
-        "6_months": "subscription_6_months",
+        "5_months": "subscription_5_months",
         "12_months": "subscription_12_months"
     }[plan_code]
 
@@ -988,8 +2789,19 @@ def initialize_contact_unlock(profile_owner_id):
         flash("Invalid member profile.", "error")
         return redirect(url_for("discover"))
 
+    if members_blocked_either_way(buyer.id, owner.id):
+        flash("Contact unlocking is unavailable because this member relationship is blocked.", "error")
+        return redirect(url_for("discover"))
+
     if not owner.contact_sharing_enabled or not owner.phone:
         flash("This member is not currently sharing their phone number.", "error")
+        return redirect(url_for("member_profile", user_id=owner.id))
+
+    if get_membership_status(buyer)["active"]:
+        flash(
+            "Your active Nexa membership already includes access to shared phone numbers.",
+            "info"
+        )
         return redirect(url_for("member_profile", user_id=owner.id))
 
     existing = ContactUnlock.query.filter_by(
@@ -997,8 +2809,10 @@ def initialize_contact_unlock(profile_owner_id):
         profile_owner_id=owner.id
     ).first()
 
-    if existing:
-        flash("You have already unlocked this phone number.", "info")
+    now = datetime.utcnow()
+
+    if existing and existing.expires_at and existing.expires_at > now:
+        flash("Your contact access is still active.", "info")
         return redirect(url_for("member_profile", user_id=owner.id))
 
     if not PAYSTACK_SECRET_KEY or PAYSTACK_MODE != "test":
@@ -1091,11 +2905,24 @@ def payment_callback():
         verified_payment = verify_and_complete_payment(reference)
 
         if verified_payment.purpose == "contact_unlock":
-            flash("Payment confirmed. The phone number is now unlocked.", "success")
-            return redirect(url_for(
-                "member_profile",
-                user_id=verified_payment.target_user_id
-            ))
+            active_unlock = ContactUnlock.query.filter(
+                ContactUnlock.buyer_id == verified_payment.user_id,
+                ContactUnlock.profile_owner_id == verified_payment.target_user_id,
+                ContactUnlock.expires_at > datetime.utcnow()
+            ).first()
+
+            if active_unlock:
+                flash("Payment confirmed. The phone number is now unlocked.", "success")
+                return redirect(url_for(
+                    "member_profile",
+                    user_id=verified_payment.target_user_id
+                ))
+
+            flash(
+                "Your payment was confirmed, but contact access was not granted. Please contact support regarding this payment.",
+                "error"
+            )
+            return redirect(url_for("discover"))
 
         if verified_payment.status == "success":
             flash(
@@ -1280,6 +3107,21 @@ with app.app_context():
         }
 
         migrations = {
+            "password_reset_token_hash": (
+                "ALTER TABLE user "
+                "ADD COLUMN password_reset_token_hash VARCHAR(64)"
+            ),
+
+            "email_verified": (
+                "ALTER TABLE user "
+                "ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT 0"
+            ),
+
+            "email_verified_at": (
+                "ALTER TABLE user "
+                "ADD COLUMN email_verified_at DATETIME"
+            ),
+
             "gender": (
                 "ALTER TABLE user "
                 "ADD COLUMN gender VARCHAR(30) DEFAULT ''"
@@ -1315,6 +3157,41 @@ with app.app_context():
 
             if column not in columns:
                 connection.execute(text(sql))
+
+        # Safely add media_type to an existing Status table.
+        status_columns = {
+            row[1]
+            for row in connection.execute(
+                text("PRAGMA table_info(status)")
+            ).fetchall()
+        }
+
+        if "media_type" not in status_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE status "
+                    "ADD COLUMN media_type VARCHAR(10) "
+                    "NOT NULL DEFAULT 'image'"
+                )
+            )
+
+        if "text_content" not in status_columns:
+            connection.execute(
+                text("ALTER TABLE status ADD COLUMN text_content TEXT")
+            )
+
+        if "caption" not in status_columns:
+            connection.execute(
+                text("ALTER TABLE status ADD COLUMN caption TEXT")
+            )
+
+        if "background_color" not in status_columns:
+            connection.execute(
+                text(
+                    "ALTER TABLE status ADD COLUMN background_color "
+                    "VARCHAR(20) NOT NULL DEFAULT '#5631A8'"
+                )
+            )
 
 
 # --------------------------------------------------

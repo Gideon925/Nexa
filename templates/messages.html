@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexa | Messages</title>
+<style>
+* { box-sizing: border-box; }
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f7f5fa;
+    color: #292333;
+}
+header {
+    background: white;
+    padding: 18px 7%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: 0 2px 10px #00000010;
+}
+.logo { color: #642da0; font-size: 26px; font-weight: bold; }
+header a { color: #642da0; text-decoration: none; margin-left: 15px; }
+main { max-width: 850px; margin: 35px auto; padding: 20px; }
+.panel {
+    background: white;
+    padding: 25px;
+    border-radius: 14px;
+    box-shadow: 0 3px 12px #00000008;
+}
+.member {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 15px;
+    padding: 18px 5px;
+    border-bottom: 1px solid #eee8f3;
+}
+.member:last-child { border-bottom: none; }
+.member a { color: #642da0; text-decoration: none; font-weight: bold; }
+.preview { color: #716b79; font-size: 14px; margin-top: 7px; }
+.unread {
+    background: #642da0;
+    color: white;
+    border-radius: 20px;
+    padding: 5px 10px;
+    font-size: 12px;
+}
+.empty { color: #716b79; padding: 25px 0; }
+@media(max-width:600px) {
+    header { padding: 16px 5%; }
+    main { margin: 15px auto; padding: 12px; }
+    .panel { padding: 18px; }
+}
+</style>
+</head>
+<body>
+<header>
+    <div class="logo">Nexa</div>
+    <nav>
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('notifications') }}">Notifications</a>
+    </nav>
+</header>
+<main>
+    <section class="panel">
+        <h1>Your messages</h1>
+        <p>Chat privately with members you have connected with.</p>
+
+        {% if connections %}
+            {% for item in connections %}
+            <div class="member">
+                <div>
+                    <a href="{{ url_for('conversation', member_id=item.member.id) }}">
+                        {{ item.member.full_name }}
+                    </a>
+                    <div class="preview">
+                        {% if item.last_message %}
+                            {% if item.last_message.sender_id == item.member.id %}
+                                {{ item.member.full_name }}:
+                            {% else %}
+                                You:
+                            {% endif %}
+                            {{ item.last_message.body[:90] }}
+                        {% else %}
+                            Start a conversation.
+                        {% endif %}
+                    </div>
+                </div>
+                <div>
+                    {% if item.unread_count > 0 %}
+                        <span class="unread">{{ item.unread_count }} new</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="empty">
+                You don't have any available conversations yet.
+                Accept a connection request to start messaging.
+            </p>
+        {% endif %}
+    </section>
+</main>
+</body>
+</html>
