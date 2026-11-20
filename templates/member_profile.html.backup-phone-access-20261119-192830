@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ member.full_name }} | Nexa</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    padding: 25px 15px;
+    background: #f7f5fa;
+    font-family: Arial, sans-serif;
+    color: #292333;
+}
+
+.container {
+    max-width: 650px;
+    margin: auto;
+}
+
+.card {
+    background: white;
+    padding: 28px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    box-shadow: 0 3px 14px #00000009;
+}
+
+h1, h2 { color: #642da0; }
+
+.photo {
+    width: 180px;
+    height: 180px;
+    object-fit: cover;
+    border-radius: 50%;
+    background: #eee8f5;
+}
+
+.photo-area { text-align: center; }
+
+.detail {
+    padding: 13px 0;
+    border-bottom: 1px solid #eee;
+    line-height: 1.6;
+}
+
+.notice {
+    background: #f3edfa;
+    padding: 15px;
+    border-radius: 8px;
+    line-height: 1.6;
+}
+
+a {
+    color: #642da0;
+    text-decoration: none;
+}
+
+.back {
+    display: inline-block;
+    padding: 13px 20px;
+    background: #642da0;
+    color: white;
+    border-radius: 7px;
+}
+</style>
+</head>
+
+<body>
+
+
+<div class="container">
+
+    <div class="card">
+
+        <div class="photo-area">
+
+            {% if member.profile_photo %}
+            <img
+                class="photo"
+                src="{{ url_for('static', filename='uploads/' + member.profile_photo) }}"
+                alt="Profile photo">
+            {% else %}
+            <div class="photo" style="display:inline-flex;align-items:center;justify-content:center;">
+                No Photo
+            </div>
+            {% endif %}
+
+            <h1>{{ member.full_name }}</h1>
+
+            <p>{{ age }} years old</p>
+
+        </div>
+
+        <div style="margin-top:20px;text-align:center;">
+
+            {% if is_blocked_by_me %}
+
+                <p class="notice">You have blocked this member.</p>
+
+                <form method="POST"
+                      action="{{ url_for('unblock_member', user_id=member.id) }}">
+                    <button type="submit" class="back"
+                            style="border:0;cursor:pointer;">
+                        Unblock Member
+                    </button>
+                </form>
+
+            {% else %}
+
+                {% if connection_status == "accepted" %}
+
+                    <p class="notice">You are connected with this member.</p>
+
+                {% elif connection_status == "pending" and request_direction == "sent" %}
+
+                    <p class="notice">Your connection request is waiting for a response.</p>
+
+                {% elif connection_status == "pending" and request_direction == "received" %}
+
+                    <p class="notice">This member has sent you a connection request.</p>
+
+                {% else %}
+
+                    <form method="POST"
+                          action="{{ url_for('send_connection_request', receiver_id=member.id) }}">
+                        <button type="submit" class="back"
+                                style="border:0;cursor:pointer;">
+                            Send Connection Request
+                        </button>
+                    </form>
+
+                {% endif %}
+
+            {% endif %}
+
+        </div>
+
+        {% if not is_blocked_by_me %}
+
+        <div class="detail">
+            <strong>Gender:</strong>
+            {{ member.gender or "Not provided" }}
+        </div>
+
+        <div class="detail">
+            <strong>Location:</strong>
+            {{ member.location or "Not provided" }}
+        </div>
+
+        <div class="detail">
+            <strong>Connection Preference:</strong>
+            {{ member.connection_preference or "Not provided" }}
+        </div>
+
+    </div>
+
+    <div class="card">
+        <h2>About {{ member.full_name }}</h2>
+        <p>{{ member.bio or "This member has not added a biography yet." }}</p>
+    </div>
+
+    <div class="card">
+        <h2>Interests</h2>
+        <p>{{ member.interests or "No interests added yet." }}</p>
+    </div>
+
+    <div class="card">
+        <h2>Contact Privacy</h2>
+
+        {% if not member.contact_sharing_enabled or not member.phone %}
+            <p class="notice">
+                This member is currently keeping their phone number private.
+            </p>
+
+        {% elif contact_unlocked %}
+            <div id="contact-active">
+                <p class="notice">
+                    You have unlocked this member's contact number:
+                </p>
+
+                <h2 id="contact-number">{{ member.phone }}</h2>
+
+                <p class="notice">
+                    Time remaining:
+                    <strong id="contact-countdown">05:00</strong>
+                </p>
+            </div>
+
+            <div id="contact-expired" style="display:none;">
+                <p class="notice">
+                    Your five-minute contact access has expired.
+                </p>
+
+                <form method="POST"
+                      action="{{ url_for('initialize_contact_unlock', profile_owner_id=member.id) }}">
+                    <button type="submit" class="back" style="border:0;cursor:pointer;">
+                        Unlock Phone Number Again — ₦1,200
+                    </button>
+                </form>
+            </div>
+
+            <script>
+            (function () {
+                const expiryTime = new Date(
+                    "{{ contact_unlock_expires_at }}Z"
+                ).getTime();
+
+                const activeSection = document.getElementById("contact-active");
+                const expiredSection = document.getElementById("contact-expired");
+                const countdown = document.getElementById("contact-countdown");
+
+                function updateCountdown() {
+                    const remaining = expiryTime - Date.now();
+
+                    if (remaining <= 0) {
+                        activeSection.style.display = "none";
+                        expiredSection.style.display = "block";
+                        return;
+                    }
+
+                    const totalSeconds = Math.ceil(remaining / 1000);
+                    const minutes = Math.floor(totalSeconds / 60);
+                    const seconds = totalSeconds % 60;
+
+                    countdown.textContent =
+                        String(minutes).padStart(2, "0") + ":" +
+                        String(seconds).padStart(2, "0");
+                }
+
+                updateCountdown();
+
+                const timer = setInterval(function () {
+                    updateCountdown();
+
+                    if (Date.now() >= expiryTime) {
+                        clearInterval(timer);
+                    }
+                }, 250);
+            })();
+            </script>
+
+        {% else %}
+            <p class="notice">
+                This member allows eligible members to unlock their phone number.
+                Pay ₦1,200 to reveal it for five minutes.
+            </p>
+
+            <form method="POST"
+                  action="{{ url_for('initialize_contact_unlock', profile_owner_id=member.id) }}">
+                <button type="submit" class="back" style="border:0;cursor:pointer;">
+                    Unlock Phone Number — ₦1,200
+                </button>
+            </form>
+        {% endif %}
+    </div>
+
+        <div class="card">
+            <h2>Safety and Privacy</h2>
+
+            <form method="POST"
+                  action="{{ url_for('block_member', user_id=member.id) }}"
+                  onsubmit="return confirm('Are you sure you want to block this member?');">
+                <button type="submit"
+                        style="padding:12px 18px;background:#a32626;color:white;border:0;border-radius:7px;cursor:pointer;">
+                    Block Member
+                </button>
+            </form>
+
+            <hr style="margin:22px 0;border:0;border-top:1px solid #eee;">
+
+            <h2>Report Member</h2>
+            <p>Report suspicious, abusive, or inappropriate behaviour.</p>
+
+            <form method="POST"
+                  action="{{ url_for('report_member', user_id=member.id) }}">
+
+                <label for="reason">Reason for report</label>
+
+                <select id="reason" name="reason" required
+                        style="display:block;width:100%;padding:12px;margin:10px 0;">
+                    <option value="">Select a reason</option>
+                    <option value="Fake profile">Fake profile</option>
+                    <option value="Harassment or bullying">Harassment or bullying</option>
+                    <option value="Inappropriate content">Inappropriate content</option>
+                    <option value="Scam or fraud">Scam or fraud</option>
+                    <option value="Threatening behaviour">Threatening behaviour</option>
+                    <option value="Other">Other</option>
+                </select>
+
+                <label for="details">Additional details (optional)</label>
+
+                <textarea id="details" name="details" maxlength="1000"
+                          rows="4"
+                          placeholder="Explain what happened..."
+                          style="display:block;width:100%;padding:12px;margin:10px 0;"></textarea>
+
+                <button type="submit"
+                        style="padding:12px 18px;background:#642da0;color:white;border:0;border-radius:7px;cursor:pointer;">
+                    Submit Report
+                </button>
+            </form>
+        </div>
+
+        {% endif %}
+
+    <a class="back" href="{{ url_for('discover') }}">Back to Discover</a>
+
+</div>
+
+</body>
+</html>
