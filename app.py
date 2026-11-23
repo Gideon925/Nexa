@@ -5,6 +5,7 @@ import uuid
 import calendar
 import hashlib
 import hmac
+import secrets
 import requests
 import smtplib
 
@@ -49,6 +50,7 @@ MAIL_PORT = int(os.environ.get("MAIL_PORT", "587"))
 MAIL_USERNAME = os.environ.get("MAIL_USERNAME", "")
 MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD", "")
 MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", MAIL_USERNAME)
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", MAIL_USERNAME)
 
 email_serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"])
 
@@ -149,6 +151,12 @@ class User(db.Model):
     )
 
     email_verified_at = db.Column(db.DateTime, nullable=True)
+
+    email_verification_code_hash = db.Column(db.String(64), nullable=True)
+    email_verification_expires_at = db.Column(db.DateTime, nullable=True)
+    email_verification_attempts = db.Column(
+        db.Integer, nullable=False, default=0
+    )
     password_reset_token_hash = db.Column(db.String(64), nullable=True)
     phone = db.Column(db.String(30), nullable=False)
     date_of_birth = db.Column(db.Date, nullable=False)
@@ -952,18 +960,63 @@ def home():
 # REGISTRATION
 # --------------------------------------------------
 
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
         full_name = request.form.get("full_name", "").strip()
         email = request.form.get("email", "").strip().lower()
         phone = request.form.get("phone", "").strip()
-        dob_text = request.form.get("date_of_birth", "")
+        dob_text = request.form.get("date_of_birth", "").strip()
+        gender = request.form.get("gender", "").strip()
+        location = request.form.get("location", "").strip()
+        bio = request.form.get("bio", "").strip()
+        interests = request.form.get("interests", "").strip()
+        connection_preference = request.form.get(
+            "connection_preference", ""
+        ).strip()
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
+        photo_file = request.files.get("profile_photo")
 
-        if not all([full_name, email, phone, dob_text, password]):
+        if not all([
+            full_name, email, phone, dob_text, gender, location,
+            bio, interests, connection_preference, password,
+            confirm_password
+        ]):
             flash("Please complete all required fields.", "error")
+            return redirect(url_for("register"))
+
+        if not photo_file or not photo_file.filename:
+            flash("Please upload a profile photo.", "error")
+            return redirect(url_for("register"))
+
+        if gender not in ["Male", "Female", "Other"]:
+            flash("Please select a valid gender.", "error")
+            return redirect(url_for("register"))
+
+        allowed_preferences = [
+            "Dating",
+            "Friendship",
+            "Friends with benefits",
+            "Casual connections",
+            "Serious relationship"
+        ]
+
+        if connection_preference not in allowed_preferences:
+            flash("Please select a valid connection preference.", "error")
+            return redirect(url_for("register"))
+
+        if len(location) < 2:
+            flash("Please enter a valid location.", "error")
+            return redirect(url_for("register"))
+
+        if len(bio) < 10 or len(bio) > 1000:
+            flash("Your bio must contain between 10 and 1000 characters.", "error")
+            return redirect(url_for("register"))
+
+        if len(interests) < 3 or len(interests) > 500:
+            flash("Your interests must contain between 3 and 500 characters.", "error")
             return redirect(url_for("register"))
 
         if request.form.get("age_confirmed") != "yes":
@@ -1001,19 +1054,79 @@ def register():
             flash("An account with this email already exists.", "error")
             return redirect(url_for("register"))
 
-        user = User(
-            full_name=full_name,
-            email=email,
-            phone=phone,
-            date_of_birth=dob,
-            contact_sharing_enabled=False,
-            email_verified=False
+        # Validate the actual uploaded image, not just its filename.
+        try:
+            photo_file.stream.seek(0)
+            photo_data = photo_file.stream.read(5 * 1024 * 1024 + 1)
+
+            if len(photo_data) > 5 * 1024 * 1024:
+                flash("Your profile photo must not exceed 5 MB.", "error")
+                return redirect(url_for("register"))
+
+            photo_file.stream.seek(0)
+            image = Image.open(photo_file.stream)
+
+            image_format = image.format
+            width, height = image.size
+
+            if image_format not in ["JPEG", "PNG", "WEBP"]:
+                flash("Upload a JPEG, PNG or WEBP image.", "error")
+                return redirect(url_for("register"))
+
+            if width < 400 or height < 400:
+                flash("Your profile photo must be at least 400 x 400 pixels.", "error")
+                return redirect(url_for("register"))
+
+            image.verify()
+            photo_file.stream.seek(0)
+
+        except Exception:
+            flash("The uploaded profile photo is invalid or damaged.", "error")
+            return redirect(url_for("register"))
+
+        extensions = {
+            "JPEG": ".jpg",
+            "PNG": ".png",
+            "WEBP": ".webp"
+        }
+
+        photo_filename = secure_filename(
+            uuid.uuid4().hex + extensions[image_format]
         )
+        photo_path = os.path.join(UPLOAD_FOLDER, photo_filename)
 
-        user.set_password(password)
+        try:
+            photo_file.save(photo_path)
 
-        db.session.add(user)
-        db.session.commit()
+            user = User(
+                full_name=full_name,
+                email=email,
+                phone=phone,
+                date_of_birth=dob,
+                gender=gender,
+                location=location,
+                bio=bio,
+                interests=interests,
+                connection_preference=connection_preference,
+                profile_photo=photo_filename,
+                contact_sharing_enabled=False,
+                email_verified=False
+            )
+
+            user.set_password(password)
+
+            db.session.add(user)
+            db.session.commit()
+
+        except Exception:
+            db.session.rollback()
+
+            if os.path.exists(photo_path):
+                os.remove(photo_path)
+
+            app.logger.exception("Could not create the new Nexa account.")
+            flash("We could not create your account. Please try again.", "error")
+            return redirect(url_for("register"))
 
         session.clear()
         session["pending_verification_email"] = user.email
@@ -1025,11 +1138,14 @@ def register():
             email_sent = False
 
         if email_sent:
-            flash("Account created. Check your email for the verification link.", "success")
+            flash(
+                "Account created. Check your email for your six-digit verification code.",
+                "success"
+            )
         else:
             flash(
                 "Your account was created, but the email could not be sent. "
-                "Please configure email delivery and use Resend Verification.",
+                "Please use Resend Verification.",
                 "warning"
             )
 
@@ -1038,27 +1154,73 @@ def register():
     return render_template("auth/register.html")
 
 
+def hash_email_otp(user_id, otp):
+    secret = app.config["SECRET_KEY"].encode("utf-8")
+    message = f"{user_id}:{otp}".encode("utf-8")
+
+    return hmac.new(
+        secret,
+        message,
+        hashlib.sha256
+    ).hexdigest()
+
+
 def send_verification_email(user):
-    token = generate_email_token(user)
-    verification_url = url_for(
-        "verify_email",
-        token=token,
-        _external=True
+    otp = f"{secrets.randbelow(1000000):06d}"
+
+    user.email_verification_code_hash = hash_email_otp(user.id, otp)
+    user.email_verification_expires_at = (
+        datetime.utcnow() + timedelta(minutes=10)
     )
+    user.email_verification_attempts = 0
+
+    db.session.commit()
 
     body = (
         f"Hello {user.full_name},\n\n"
-        "Welcome to Nexa. Please verify your email address by opening this link:\n\n"
-        f"{verification_url}\n\n"
-        "This link expires after one hour. If you did not create this account, "
-        "you can ignore this email.\n\n"
+        "Welcome to Nexa. Your email verification code is:\n\n"
+        f"{otp}\n\n"
+        "This code expires in 10 minutes.\n"
+        "You have a maximum of 5 attempts.\n\n"
+        "If you did not create this account, you can ignore this email.\n\n"
         "Nexa Team"
     )
 
     return send_nexa_email(
         user.email,
-        "Verify your Nexa email address",
+        "Your Nexa verification code",
         body
+    )
+
+
+def send_admin_new_member_notification(user):
+    if not ADMIN_EMAIL:
+        app.logger.error("Admin email is not configured.")
+        return False
+
+    details = [
+        "A new member has successfully verified their email and joined Nexa.",
+        "",
+        f"Full name: {user.full_name}",
+        f"Email address: {user.email}",
+        f"Phone number: {user.phone}",
+        f"Date of birth: {user.date_of_birth}",
+        f"Gender: {user.gender or 'Not provided'}",
+        f"Location: {user.location or 'Not provided'}",
+        f"Bio: {user.bio or 'Not provided'}",
+        f"Interests: {user.interests or 'Not provided'}",
+        f"Connection preference: {user.connection_preference or 'Not provided'}",
+        f"Profile photo: {user.profile_photo or 'Not provided'}",
+        f"Registration date: {user.created_at}",
+        "",
+        "This member has successfully completed email verification.",
+        "Nexa Administration"
+    ]
+
+    return send_nexa_email(
+        ADMIN_EMAIL,
+        "New verified member joined Nexa",
+        "\n".join(details)
     )
 
 
@@ -1072,32 +1234,85 @@ def verification_pending():
     )
 
 
-@app.route("/verify-email/<token>")
-def verify_email(token):
-    try:
-        data = verify_email_token(token)
-    except SignatureExpired:
-        flash("This verification link has expired. Please request another.", "error")
-        return redirect(url_for("verification_pending"))
-    except BadSignature:
-        flash("This verification link is invalid.", "error")
+@app.route("/verify-email-otp", methods=["POST"])
+def verify_email_otp():
+    email = session.get("pending_verification_email", "").strip().lower()
+    otp = request.form.get("otp", "").strip()
+
+    if not email:
+        flash("Please register or sign in again.", "error")
         return redirect(url_for("login"))
 
-    user = db.session.get(User, data.get("user_id"))
+    user = User.query.filter_by(email=email).first()
 
-    if user is None or user.email != data.get("email"):
-        flash("This verification link is invalid.", "error")
-        return redirect(url_for("login"))
+    if user is None:
+        flash("Account not found. Please register again.", "error")
+        return redirect(url_for("register"))
 
     if user.email_verified:
         flash("Your email is already verified. Please sign in.", "success")
         return redirect(url_for("login"))
 
+    if not otp.isdigit() or len(otp) != 6:
+        flash("Enter the six-digit verification code.", "error")
+        return redirect(url_for("verification_pending"))
+
+    if user.email_verification_attempts >= 5:
+        user.email_verification_code_hash = None
+        user.email_verification_expires_at = None
+        db.session.commit()
+        flash("Too many incorrect attempts. Request a new code.", "error")
+        return redirect(url_for("verification_pending"))
+
+    if (
+        user.email_verification_expires_at is None
+        or datetime.utcnow() > user.email_verification_expires_at
+    ):
+        user.email_verification_code_hash = None
+        user.email_verification_expires_at = None
+        db.session.commit()
+        flash("Your code has expired. Request a new one.", "error")
+        return redirect(url_for("verification_pending"))
+
+    submitted_hash = hash_email_otp(user.id, otp)
+
+    if (
+        not user.email_verification_code_hash
+        or not hmac.compare_digest(
+            submitted_hash,
+            user.email_verification_code_hash
+        )
+    ):
+        user.email_verification_attempts += 1
+
+        if user.email_verification_attempts >= 5:
+            user.email_verification_code_hash = None
+            user.email_verification_expires_at = None
+            flash("Too many incorrect attempts. Request a new code.", "error")
+        else:
+            remaining = 5 - user.email_verification_attempts
+            flash(
+                f"Incorrect code. You have {remaining} attempts remaining.",
+                "error"
+            )
+
+        db.session.commit()
+        return redirect(url_for("verification_pending"))
+
     user.email_verified = True
     user.email_verified_at = datetime.utcnow()
+    user.email_verification_code_hash = None
+    user.email_verification_expires_at = None
+    user.email_verification_attempts = 0
+
     db.session.commit()
 
     session.clear()
+
+    try:
+        send_admin_new_member_notification(user)
+    except Exception:
+        app.logger.exception("Could not send new-member admin notification.")
 
     flash("Your email has been verified. You can now sign in.", "success")
     return redirect(url_for("login"))
@@ -1117,14 +1332,14 @@ def resend_verification():
 
         try:
             if send_verification_email(user):
-                flash("A new verification link has been sent.", "success")
+                flash("A new six-digit verification code has been sent.", "success")
             else:
                 flash("Email delivery is not configured yet. Please try again later.", "warning")
         except Exception:
-            app.logger.exception("Could not resend verification email.")
+            app.logger.exception("Could not resend verification code.")
             flash("We could not send the email. Please try again later.", "error")
     else:
-        flash("If the account needs verification, a new link can be requested.", "info")
+        flash("If the account needs verification, a new code can be requested.", "info")
 
     return redirect(url_for("verification_pending"))
 
@@ -3120,6 +3335,22 @@ with app.app_context():
             "email_verified_at": (
                 "ALTER TABLE user "
                 "ADD COLUMN email_verified_at DATETIME"
+            ),
+
+            "email_verification_code_hash": (
+                "ALTER TABLE user "
+                "ADD COLUMN email_verification_code_hash VARCHAR(64)"
+            ),
+
+            "email_verification_expires_at": (
+                "ALTER TABLE user "
+                "ADD COLUMN email_verification_expires_at DATETIME"
+            ),
+
+            "email_verification_attempts": (
+                "ALTER TABLE user "
+                "ADD COLUMN email_verification_attempts "
+                "INTEGER NOT NULL DEFAULT 0"
             ),
 
             "gender": (

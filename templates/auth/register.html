@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create Nexa Account</title>
+
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: Arial, sans-serif;
             background: #10101a;
@@ -12,25 +17,67 @@
             display: flex;
             justify-content: center;
             padding: 30px 15px;
+            margin: 0;
         }
+
         .container {
             background: #1c1c2b;
             padding: 30px;
             border-radius: 12px;
             width: 100%;
-            max-width: 430px;
+            max-width: 500px;
         }
-        h1 { text-align: center; color: #d8a7ff; }
-        input {
+
+        h1 {
+            text-align: center;
+            color: #d8a7ff;
+        }
+
+        h2 {
+            color: #d8a7ff;
+            font-size: 18px;
+            margin-top: 28px;
+        }
+
+        input:not([type="checkbox"]),
+        select,
+        textarea {
             width: 100%;
             padding: 12px;
             margin: 8px 0 15px;
-            box-sizing: border-box;
             border-radius: 6px;
             border: 1px solid #555;
             background: #29293b;
             color: white;
+            font-size: 14px;
         }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        input[type="file"] {
+            padding: 10px;
+        }
+
+        input[type="checkbox"] {
+            width: auto;
+            margin-right: 7px;
+        }
+
+        label {
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .hint {
+            color: #b8b8c9;
+            font-size: 12px;
+            margin-top: -8px;
+            margin-bottom: 15px;
+        }
+
         button {
             width: 100%;
             padding: 14px;
@@ -40,17 +87,48 @@
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
+            font-size: 16px;
+            margin-top: 15px;
         }
-        label { font-size: 14px; }
-        .message { color: #ff9999; margin-bottom: 12px; }
-        a { color: #d8a7ff; }
+
+        button:hover {
+            background: #9333ea;
+        }
+
+        .message {
+            color: #ff9999;
+            margin-bottom: 12px;
+        }
+
+        a {
+            color: #d8a7ff;
+        }
+
+        .checkbox-row {
+            margin: 18px 0;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .required-note {
+            color: #ffb6b6;
+            font-size: 13px;
+        }
     </style>
 </head>
+
 <body>
 
 <div class="container">
+
     <h1>Join Nexa</h1>
-    <p>Create your account. You must be 18 or older.</p>
+
+    <p>
+        Create your Nexa account and tell us a little about yourself.
+        All fields are required. You must be 18 or older.
+    </p>
+
+    <p class="required-note">* All fields are compulsory.</p>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, message in messages %}
@@ -58,39 +136,174 @@
         {% endfor %}
     {% endwith %}
 
-    <form method="POST">
-        <label>Full Name</label>
-        <input type="text" name="full_name" required>
+    <form method="POST" enctype="multipart/form-data">
 
-        <label>Email Address</label>
-        <input type="email" name="email" required>
+        <h2>Personal Information</h2>
 
-        <label>Phone Number</label>
-        <input type="tel" name="phone" required>
+        <label for="full_name">Full Name *</label>
+        <input
+            type="text"
+            id="full_name"
+            name="full_name"
+            autocomplete="name"
+            required
+        >
 
-        <label>Date of Birth</label>
-        <input type="date" name="date_of_birth" required>
+        <label for="email">Email Address *</label>
+        <input
+            type="email"
+            id="email"
+            name="email"
+            autocomplete="email"
+            required
+        >
 
-        <label>Password (minimum 8 characters)</label>
-        <input type="password" name="password" minlength="8" required>
+        <label for="phone">Phone Number *</label>
+        <input
+            type="tel"
+            id="phone"
+            name="phone"
+            autocomplete="tel"
+            required
+        >
 
-        <label>Confirm Password</label>
-        <input type="password" name="confirm_password" minlength="8" required>
+        <label for="date_of_birth">Date of Birth *</label>
+        <input
+            type="date"
+            id="date_of_birth"
+            name="date_of_birth"
+            required
+        >
 
-        <p>
-            <input type="checkbox" name="age_confirmed" value="yes" required style="width:auto">
-            I confirm that I am 18 years or older.
+        <label for="gender">Gender *</label>
+        <select id="gender" name="gender" required>
+            <option value="">Select your gender</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Other">Other</option>
+        </select>
+
+        <label for="location">Where are you from? (City and State) *</label>
+        <input
+            type="text"
+            id="location"
+            name="location"
+            placeholder="Example: Calabar, Cross River State"
+            maxlength="150"
+            required
+        >
+
+        <h2>About You</h2>
+
+        <label for="bio">Tell us about yourself *</label>
+        <textarea
+            id="bio"
+            name="bio"
+            minlength="10"
+            maxlength="1000"
+            placeholder="Introduce yourself. Tell other members a little about who you are."
+            required
+        ></textarea>
+        <p class="hint">Minimum 10 characters. Maximum 1,000 characters.</p>
+
+        <label for="interests">Your Interests *</label>
+        <textarea
+            id="interests"
+            name="interests"
+            minlength="3"
+            maxlength="500"
+            placeholder="Example: Music, travelling, reading, sports, technology..."
+            required
+        ></textarea>
+        <p class="hint">Tell us about the things you enjoy.</p>
+
+        <label for="connection_preference">What are you looking for on Nexa? *</label>
+        <select
+            id="connection_preference"
+            name="connection_preference"
+            required
+        >
+            <option value="">Choose your preference</option>
+            <option value="Dating">Dating</option>
+            <option value="Friendship">Friendship</option>
+            <option value="Friends with benefits">Friends with benefits</option>
+            <option value="Casual connections">Casual connections</option>
+            <option value="Serious relationship">Serious relationship</option>
+        </select>
+
+        <h2>Your Profile Photo</h2>
+
+        <label for="profile_photo">Upload a Clear Photo of Yourself *</label>
+        <input
+            type="file"
+            id="profile_photo"
+            name="profile_photo"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+            required
+        >
+
+        <p class="hint">
+            Accepted formats: JPG, PNG and WEBP.
+            Minimum image dimensions: 400 × 400 pixels.
+            Please upload a clear photo of yourself.
         </p>
 
-        <p>
-            <input type="checkbox" name="terms" value="yes" required style="width:auto">
-            I agree to Nexa's terms and conditions.
-        </p>
+        <h2>Account Security</h2>
+
+        <label for="password">Password *</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            minlength="8"
+            autocomplete="new-password"
+            required
+        >
+
+        <label for="confirm_password">Confirm Password *</label>
+        <input
+            type="password"
+            id="confirm_password"
+            name="confirm_password"
+            minlength="8"
+            autocomplete="new-password"
+            required
+        >
+
+        <div class="checkbox-row">
+            <label>
+                <input
+                    type="checkbox"
+                    name="age_confirmed"
+                    value="yes"
+                    required
+                >
+                I confirm that I am 18 years or older.
+            </label>
+        </div>
+
+        <div class="checkbox-row">
+            <label>
+                <input
+                    type="checkbox"
+                    name="terms"
+                    value="yes"
+                    required
+                >
+                I agree to Nexa's Terms and Privacy Policy.
+            </label>
+        </div>
 
         <button type="submit">Create Account</button>
+
     </form>
 
-    <p>Already registered? <a href="{{ url_for('login') }}">Login</a></p>
+    <p>
+        Already registered?
+        <a href="{{ url_for('login') }}">Login</a>
+    </p>
+
 </div>
+
 </body>
 </html>
