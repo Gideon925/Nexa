@@ -71,26 +71,46 @@ def verify_email_token(token, max_age=3600):
 
 
 def send_nexa_email(recipient, subject, body):
-    if not all([MAIL_USERNAME, MAIL_PASSWORD, MAIL_DEFAULT_SENDER]):
-        if app.debug:
-            print("\\n===== NEXA EMAIL NOT CONFIGURED =====")
-            print("Verification email preview:")
-            print(body)
-            print("=====================================\\n")
+    resend_api_key = os.environ.get("RESEND_API_KEY", "")
+    resend_from_email = os.environ.get(
+        "RESEND_FROM_EMAIL",
+        "Nexa <onboarding@resend.dev>"
+    )
+
+    if not resend_api_key:
+        app.logger.error("RESEND_API_KEY is not configured.")
         return False
 
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = MAIL_DEFAULT_SENDER
-    message["To"] = recipient
-    message.set_content(body)
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "from": resend_from_email,
+                "to": [recipient],
+                "subject": subject,
+                "text": body,
+            },
+            timeout=20,
+        )
 
-    with smtplib.SMTP(MAIL_SERVER, MAIL_PORT, timeout=20) as server:
-        server.starttls()
-        server.login(MAIL_USERNAME, MAIL_PASSWORD)
-        server.send_message(message)
+        if response.status_code not in (200, 201):
+            app.logger.error(
+                "Resend failed: HTTP %s - %s",
+                response.status_code,
+                response.text
+            )
+            return False
 
-    return True
+        app.logger.info("Email accepted by Resend.")
+        return True
+
+    except requests.RequestException:
+        app.logger.exception("Resend connection failed.")
+        return False
 
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
