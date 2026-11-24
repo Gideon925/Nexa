@@ -1653,6 +1653,30 @@ def status_feed():
     )
 
 
+def send_admin_member_activity_notification(user, action, details):
+    if not ADMIN_EMAIL:
+        app.logger.error("Admin email is not configured.")
+        return False
+
+    message = [
+        "A member activity has occurred on Nexa.",
+        "",
+        f"Member name: {user.full_name}",
+        f"Member email: {user.email}",
+        f"Activity: {action}",
+        f"Details: {details}",
+        f"Time (UTC): {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "Nexa Administration"
+    ]
+
+    return send_nexa_email(
+        ADMIN_EMAIL,
+        f"Nexa member activity: {action}",
+        "\n".join(message)
+    )
+
+
 @app.route("/status/upload", methods=["POST"])
 @login_required
 @profile_complete_required
@@ -1846,6 +1870,22 @@ def upload_status():
         flash("Your Status upload failed. Please try again.", "error")
         return redirect(url_for("status_feed"))
 
+    try:
+        media_types = sorted({
+            item.media_type for item in new_statuses
+        })
+
+        send_admin_member_activity_notification(
+            current_user,
+            "Status uploaded",
+            f"Uploaded {len(new_statuses)} Status item(s). "
+            f"Content types: {', '.join(media_types)}."
+        )
+    except Exception:
+        app.logger.exception(
+            "Could not send Status upload admin notification."
+        )
+
     flash(
         f"{len(new_statuses)} Status item(s) uploaded successfully.",
         "success"
@@ -1870,8 +1910,21 @@ def delete_status(status_id):
         filename = os.path.basename(status.filename)
         file_path = os.path.join(STATUS_UPLOAD_FOLDER, filename)
 
+    deleted_media_type = status.media_type or "unknown"
+
     db.session.delete(status)
     db.session.commit()
+
+    try:
+        send_admin_member_activity_notification(
+            current_user,
+            "Status deleted",
+            f"Deleted a {deleted_media_type} Status item."
+        )
+    except Exception:
+        app.logger.exception(
+            "Could not send Status deletion admin notification."
+        )
 
     if file_path and os.path.isfile(file_path):
         try:
@@ -2075,6 +2128,19 @@ def conversation(member_id):
         db.session.add(new_notification)
         db.session.commit()
 
+        try:
+            send_admin_member_activity_notification(
+                current_user,
+                "Private message sent",
+                f"Sent a private message to {member.full_name} "
+                f"(member ID: {member.id}). "
+                "Message content is not included for privacy."
+            )
+        except Exception:
+            app.logger.exception(
+                "Could not send private message admin notification."
+            )
+
         return redirect(url_for("conversation", member_id=member_id))
 
     messages = Message.query.filter(
@@ -2175,6 +2241,16 @@ def profile():
         return redirect(url_for("login"))
 
     if request.method == "POST":
+
+        original_profile_values = {
+            "Gender": user.gender,
+            "Location": user.location,
+            "About Me": user.bio,
+            "Interests": user.interests,
+            "Connection preference": user.connection_preference,
+            "Contact-sharing preference": user.contact_sharing_enabled,
+            "Profile photo": user.profile_photo
+        }
 
         user.gender = request.form.get(
             "gender", ""
@@ -2299,6 +2375,33 @@ def profile():
             return redirect(url_for("profile"))
 
         db.session.commit()
+
+        changed_profile_fields = [
+            field_name
+            for field_name, old_value in original_profile_values.items()
+            if old_value != {
+                "Gender": user.gender,
+                "Location": user.location,
+                "About Me": user.bio,
+                "Interests": user.interests,
+                "Connection preference": user.connection_preference,
+                "Contact-sharing preference": user.contact_sharing_enabled,
+                "Profile photo": user.profile_photo
+            }[field_name]
+        ]
+
+        if changed_profile_fields:
+            try:
+                send_admin_member_activity_notification(
+                    user,
+                    "Profile updated",
+                    "Changed profile fields: "
+                    + ", ".join(changed_profile_fields)
+                )
+            except Exception:
+                app.logger.exception(
+                    "Could not send profile update admin notification."
+                )
 
         flash("Your profile has been updated.", "success")
 
@@ -3264,11 +3367,36 @@ def settings():
                 flash("That email address is already registered.", "error")
                 return redirect(url_for("settings"))
 
+            changed_account_fields = []
+
+            if user.full_name != full_name:
+                changed_account_fields.append("Full name")
+
+            if user.email != email:
+                changed_account_fields.append("Email address")
+
+            if user.phone != phone:
+                changed_account_fields.append("Phone number")
+
             user.full_name = full_name
             user.email = email
             user.phone = phone
 
             db.session.commit()
+
+            if changed_account_fields:
+                try:
+                    send_admin_member_activity_notification(
+                        user,
+                        "Account information updated",
+                        "Changed account fields: "
+                        + ", ".join(changed_account_fields)
+                    )
+                except Exception:
+                    app.logger.exception(
+                        "Could not send account update admin notification."
+                    )
+
             flash("Your account information has been updated.", "success")
 
         elif action == "change_password":
@@ -3290,6 +3418,17 @@ def settings():
 
             user.set_password(new_password)
             db.session.commit()
+
+            try:
+                send_admin_member_activity_notification(
+                    user,
+                    "Password changed",
+                    "The member successfully changed their password."
+                )
+            except Exception:
+                app.logger.exception(
+                    "Could not send password change admin notification."
+                )
 
             flash("Your password has been changed successfully.", "success")
 
