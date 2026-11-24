@@ -71,46 +71,48 @@ def verify_email_token(token, max_age=3600):
 
 
 def send_nexa_email(recipient, subject, body):
-    resend_api_key = os.environ.get("RESEND_API_KEY", "")
-    resend_from_email = os.environ.get(
-        "RESEND_FROM_EMAIL",
-        "Nexa <onboarding@resend.dev>"
-    )
+    script_url = os.environ.get("NEXA_EMAIL_SCRIPT_URL", "")
+    secret = os.environ.get("NEXA_SECRET", "")
 
-    if not resend_api_key:
-        app.logger.error("RESEND_API_KEY is not configured.")
+    if not script_url or not secret:
+        app.logger.error("Google email service settings are missing.")
         return False
 
     try:
         response = requests.post(
-            "https://api.resend.com/emails",
-            headers={
-                "Authorization": f"Bearer {resend_api_key}",
-                "Content-Type": "application/json",
-            },
+            script_url,
             json={
-                "from": resend_from_email,
-                "to": [recipient],
+                "secret": secret,
+                "to": recipient,
                 "subject": subject,
-                "text": body,
+                "message": body,
             },
-            timeout=20,
+            timeout=40,
         )
 
-        if response.status_code not in (200, 201):
+        if response.status_code != 200:
             app.logger.error(
-                "Resend failed: HTTP %s - %s",
-                response.status_code,
-                response.text
+                "Google email service HTTP error: %s",
+                response.status_code
             )
             return False
 
-        app.logger.info("Email accepted by Resend.")
-        return True
+        result = response.json()
 
-    except requests.RequestException:
-        app.logger.exception("Resend connection failed.")
+        if result.get("success") is True:
+            app.logger.info("Email sent successfully through Google.")
+            return True
+
+        app.logger.error(
+            "Google email service rejected request: %s",
+            result.get("message", "Unknown error")
+        )
         return False
+
+    except Exception:
+        app.logger.exception("Google email service connection failed.")
+        return False
+
 
 UPLOAD_FOLDER = os.path.join(app.root_path, "static", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
